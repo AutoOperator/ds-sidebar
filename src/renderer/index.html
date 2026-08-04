@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DS侧栏</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶栏：视图1 为细条文字，视图2 为统计控制行；≡ 打开菜单 -->
+    <div id="topbar">
+      <button id="view-btn" class="icon-btn" title="菜单">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <rect x="1" y="2" width="14" height="2" rx="1"/>
+          <rect x="1" y="7" width="14" height="2" rx="1"/>
+          <rect x="1" y="12" width="14" height="2" rx="1"/>
+        </svg>
+      </button>
+
+      <!-- 视图1：一条文字  模型(点切换) | 余额 | 双倍/平价 | 今日消费(点切API) -->
+      <div id="strip-info" class="strip-info">
+        <span class="si-model clickable" id="si-model" title="点击切换模型">--</span>
+        <span class="si-sep"></span>
+        <span class="si-bal" id="si-balance">余额 ¥--</span>
+        <span class="si-sep"></span>
+        <span class="si-price" id="si-price">--</span>
+        <span class="si-sep"></span>
+        <span class="si-today clickable" id="si-today" title="点击切换API">今日 ¥--</span>
+      </div>
+
+      <!-- 视图2：范围 + 统计控制 -->
+      <div id="chart-header" class="chart-header hidden">
+        <span class="ch-title" id="v2-title">消费金额 · 近30天</span>
+        <div class="ctrl-seg" id="range-seg">
+          <button data-range="7d" class="seg-btn">近7天</button>
+          <button data-range="30d" class="seg-btn active">近30天</button>
+          <button data-range="month" class="seg-btn">本月</button>
+          <button data-range="lastMonth" class="seg-btn">上月</button>
+        </div>
+        <div class="ctrl-right">
+          <div class="ctrl-seg" id="metric-seg">
+            <button data-metric="cost" class="seg-btn active">金额</button>
+            <button data-metric="tokens" class="seg-btn">Tokens</button>
+          </div>
+          <div class="ctrl-seg" id="group-seg">
+            <button data-group="model" class="seg-btn active">按模型</button>
+            <button data-group="api" class="seg-btn">按API</button>
+          </div>
+        </div>
+        <div class="stats3">
+          <div class="mini-stat"><span class="ms-label">消费</span><span class="ms-value" id="v2-cost">¥--</span></div>
+          <div class="mini-stat"><span class="ms-label">请求</span><span class="ms-value" id="v2-requests">--</span></div>
+          <div class="mini-stat"><span class="ms-label">Tokens</span><span class="ms-value" id="v2-tokens">--</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 视图2：图表区 -->
+    <div id="chart-area" class="hidden">
+      <div id="main-chart" class="chart main"></div>
+      <div class="foot" id="v2-foot">--</div>
+    </div>
+  </div>
+
+  <script src="./vendor/echarts.min.js"></script>
+  <script src="./renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DS侧栏菜单</title>
+<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./menu.css">
+</head>
+<body>
+  <div id="menu">
+    <button id="view-item" class="menu-item">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <rect x="1" y="2" width="6" height="6" rx="1.5"/>
+        <rect x="9" y="2" width="6" height="6" rx="1.5"/>
+        <rect x="1" y="10" width="6" height="6" rx="1.5"/>
+        <rect x="9" y="10" width="6" height="6" rx="1.5"/>
+      </svg>
+      <span id="view-label">切换为图表</span>
+    </button>
+    <button id="refresh-item" class="menu-item">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M13.65 2.35a7 7 0 0 0-11.3 1.1L1 2v5h5L4.5 5.5a5 5 0 1 1 3 8.4l-1.2 1.6a7 7 0 0 0 7.35-13.15z"/>
+      </svg>
+      <span>刷新数据</span>
+    </button>
+    <div id="filter-item" class="menu-item has-sub">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1.5 3h13l-5 5.5V12l-3 1.5V8.5z"/>
+      </svg>
+      <span id="filter-label">统计筛选</span>
+      <span class="arrow">▸</span>
+    </div>
+    <div id="filter-sub" class="sub hidden">
+      <input type="text" id="filter-search" class="text-input" placeholder="搜索 API...">
+      <div class="filter-list" id="filter-list"></div>
+    </div>
+    <div id="settings-item" class="menu-item has-sub">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <circle cx="8" cy="8" r="2.6"/>
+        <path d="M8 1.6l.65 1.53a5.3 5.3 0 0 1 2.23.92l1.62-.45.92 1.68-1.14 1.22a5.3 5.3 0 0 1 0 2.4l1.14 1.22-.92 1.68-1.62-.45a5.3 5.3 0 0 1-2.23.92L8 14.4l-1.5-1.53a5.3 5.3 0 0 1-2.23-.92l-1.62.45-.92-1.68 1.14-1.22a5.3 5.3 0 0 1 0-2.4L1.73 5.88l.92-1.68 1.62.45a5.3 5.3 0 0 1 2.23-.92L8 1.6z"/>
+      </svg>
+      <span>设置</span>
+      <span class="arrow">▸</span>
+    </div>
+    <div id="settings-sub" class="sub hidden">
+      <div class="sub-row">
+        <span class="sub-label">主题</span>
+        <div class="seg">
+          <button id="theme-day" class="seg-btn">日间</button>
+          <button id="theme-night" class="seg-btn">夜间</button>
+        </div>
+      </div>
+      <div class="sub-row">
+        <span class="sub-label">透明度</span>
+        <input type="range" id="opacity-slider" min="40" max="100" step="1" value="100">
+        <span class="sub-val" id="opacity-val">100%</span>
+      </div>
+      <div class="sub-row col">
+        <span class="sub-label">API Key · 余额 <em id="api-key-src"></em></span>
+        <input type="password" id="api-key-input" class="text-input" placeholder="sk-...">
+      </div>
+      <div class="sub-row col">
+        <span class="sub-label">User Token · 用量/全部API <em id="user-token-src"></em></span>
+        <input type="password" id="user-token-input" class="text-input" placeholder="platform 网页 token">
+      </div>
+      <div class="sub-row">
+        <span class="sub-hint">User Token 可统计该账户下所有 API · 留空读 Claude 配置/ds-watch</span>
+        <button id="creds-save" class="seg-btn primary">保存</button>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <button id="close-item" class="menu-item danger">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+      </svg>
+      <span>关闭到托盘</span>
+    </button>
+  </div>
+  <script src="./menu.js"></script>
+</body>
+</html>

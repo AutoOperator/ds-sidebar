@@ -1,0 +1,7 @@
+node_modules/
+dist/
+shots/
+config/
+state.json
+*.log
+.DS_Store
