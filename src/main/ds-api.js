@@ -14,14 +14,18 @@ const HOUR_8 = 8 * 3600 * 1000;
 const DAY = 86400000;
 const CACHE_TTL = 60000;
 
+// 纯净模式：设置 DS_CLEAN_MODE=1 时不回退读取 ~/.claude 配置，仅用应用内设置的凭证
+const cleanMode = () => !!process.env.DS_CLEAN_MODE;
+
 function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 }
 
-// ── 凭证：优先应用设置，其次 Claude 配置 / ds-watch ──
+// ── 凭证：优先应用设置，其次 Claude 配置 / ds-watch（纯净模式禁用回退）──
 function getApiKey() {
   const s = store.getSettings();
   if (s.apiKey) return s.apiKey;
+  if (cleanMode()) return '';
   const cfg = readJson(SETTINGS_PATH, {});
   return (cfg.env && cfg.env.ANTHROPIC_AUTH_TOKEN) || '';
 }
@@ -29,10 +33,12 @@ function getApiKey() {
 function getUserToken() {
   const s = store.getSettings();
   if (s.userToken) return s.userToken;
+  if (cleanMode()) return null;
   try { return fs.readFileSync(path.join(DS_WATCH_DIR, 'user_token'), 'utf8').trim(); } catch { return null; }
 }
 
 function getModel() {
+  if (cleanMode()) return 'deepseek-v4-flash';
   const s = readJson(SETTINGS_PATH, {});
   const env = s.env || {};
   return env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'deepseek-v4-flash';
@@ -241,9 +247,11 @@ async function getApiKeyList(force) {
 // ── 设置页回显凭证（含来源）──
 function getCreds() {
   const s = store.getSettings();
-  const claudeKey = (readJson(SETTINGS_PATH, {}).env || {}).ANTHROPIC_AUTH_TOKEN || '';
+  const claudeKey = !cleanMode() && (readJson(SETTINGS_PATH, {}).env || {}).ANTHROPIC_AUTH_TOKEN || '';
   let fileToken = null;
-  try { fileToken = fs.readFileSync(path.join(DS_WATCH_DIR, 'user_token'), 'utf8').trim(); } catch { /* 忽略 */ }
+  if (!cleanMode()) {
+    try { fileToken = fs.readFileSync(path.join(DS_WATCH_DIR, 'user_token'), 'utf8').trim(); } catch { /* 忽略 */ }
+  }
   return {
     apiKey: s.apiKey || claudeKey,
     apiKeySource: s.apiKey ? 'settings' : (claudeKey ? 'claude' : 'none'),
