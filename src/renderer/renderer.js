@@ -2,10 +2,13 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const els = {
+    app: $('app'),
     stripInfo: $('strip-info'), chartHeader: $('chart-header'), chartArea: $('chart-area'),
-    viewBtn: $('view-btn'),
+    viewBtn: $('view-btn'), pinBtn: $('pin-btn'),
     siModel: $('si-model'), siBalance: $('si-balance'), siPrice: $('si-price'), siToday: $('si-today'),
+    siDemo: $('si-demo'), siLogin: $('si-login'),
     v2Title: $('v2-title'), v2Cost: $('v2-cost'), v2Requests: $('v2-requests'), v2Tokens: $('v2-tokens'),
+    v2Demo: $('v2-demo'),
     v2Foot: $('v2-foot'), mainChart: $('main-chart'),
     rangeSeg: $('range-seg'), metricSeg: $('metric-seg'), groupSeg: $('group-seg'),
   };
@@ -81,8 +84,13 @@
     return { c, t, r };
   }
 
+  // 凭证缺失/失效 → 需要重新登录
+  const loginError = () => data && data.error && /token|401|未登录/i.test(String(data.error));
+
   function renderStrip() {
     if (!data) return;
+    els.siDemo.classList.toggle('hidden', !data.demo);
+    els.siLogin.classList.toggle('hidden', !loginError());
     const m = stripSel.model || data.model || '全部';
     els.siModel.textContent = m === 'all' ? '全部' : shortModel(m);
     els.siBalance.innerHTML = '余额 <span class="green">' + fmtMoney(data.balance) + '</span>';
@@ -119,6 +127,7 @@
   function render(d) {
     data = d || data;
     if (!data) return;
+    els.v2Demo.classList.toggle('hidden', !data.demo);
     if (data.range) chartSel.range = data.range;
     renderStrip();
     const totals = data.totals || { cost: 0, tokens: 0, requests: 0 };
@@ -127,6 +136,7 @@
     els.v2Tokens.textContent = fmtTokens(totals.tokens);
     els.v2Title.textContent = chartSel.metric === 'tokens' ? 'Tokens' : '消费金额';
     els.v2Foot.textContent = '共 ¥' + Number(totals.cost).toFixed(2) + ' · ' + fmtTokens(totals.tokens) + ' · ' + fmtReq(totals.requests) + ' 次 · 更新于 ' + timeAgo(data.updatedAt);
+    if (loginError()) els.v2Foot.textContent = '未登录 · 点击左上角 ≡ 打开设置登录';
     syncControlUI();
     if (viewMode === 2) renderCharts();
   }
@@ -314,6 +324,8 @@
   function applySettings(s) {
     settings = { ...settings, ...s };
     applyTheme(settings.theme);
+    els.pinBtn.classList.toggle('active', settings.pinned === true);
+    els.app.classList.toggle('pinned', settings.pinned === true); // 固定：禁止拖动
   }
   window.api.settings.onChanged((s) => applySettings(s));
 
@@ -322,6 +334,13 @@
     e.stopPropagation();
     const r = els.viewBtn.getBoundingClientRect();
     window.api.menu.open(Math.round(r.left), Math.round(r.bottom) + 2);
+  });
+
+  // ── 固定按钮：禁止拖动 + 禁止吸附 + 禁止自动隐藏 ──
+  els.pinBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    applySettings({ pinned: !(settings.pinned === true) });
+    window.api.settings.update({ pinned: settings.pinned });
   });
   document.getElementById('app').addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -332,6 +351,13 @@
   // 细条交互：模型 / 今日消费 点击循环
   els.siModel.addEventListener('click', (e) => { e.stopPropagation(); nextModel(); });
   els.siToday.addEventListener('click', (e) => { e.stopPropagation(); nextApi(); });
+
+  // 未登录提示 → 打开设置菜单（含凭证填写与一键登录）
+  els.siLogin.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const r = els.siLogin.getBoundingClientRect();
+    window.api.menu.open(Math.round(r.left), Math.round(r.bottom) + 2);
+  });
 
   window.api.window.onSetView((mode) => setView(mode === 2 ? 2 : 1));
 

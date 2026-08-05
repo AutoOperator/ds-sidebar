@@ -21,6 +21,8 @@ DeepSeek API 用量侧边栏。侧边吸附 + 悬浮滑出，实时显示余额 
 | API Key 列表 | `platform.deepseek.com/api/v0/users/get_api_keys` | User Token |
 
 > 凭证在应用「设置」里填写，保存在本地配置文件，不会上传。User Token 是账户级凭证，可统计该账户下所有 API Key 的用量。
+>
+> 凭证落盘前会用系统级加密（Windows DPAPI / macOS Keychain）加密后再写入，配置文件里不会出现明文 token。
 
 ## 运行
 
@@ -36,6 +38,10 @@ npm start
 - Electron 31（无边框透明窗口、托盘、吸附）
 - ECharts 5（堆叠条形图）
 - Node.js 内置 `fetch` 直连 DeepSeek 平台接口
+
+## 免责声明
+
+本项目为**非官方**客户端，使用 DeepSeek 平台的网页私有接口（`platform.deepseek.com/api/v0/...`），仅供个人学习与自用。接口字段、地址可能随平台调整而失效，请谨慎使用。使用过程中产生的账户风险由使用者自行承担，与 DeepSeek 官方无关。
 
 ## License
 

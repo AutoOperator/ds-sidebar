@@ -23,17 +23,6 @@
       </svg>
       <span>刷新数据</span>
     </button>
-    <div id="filter-item" class="menu-item has-sub">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M1.5 3h13l-5 5.5V12l-3 1.5V8.5z"/>
-      </svg>
-      <span id="filter-label">统计筛选</span>
-      <span class="arrow">▸</span>
-    </div>
-    <div id="filter-sub" class="sub hidden">
-      <input type="text" id="filter-search" class="text-input" placeholder="搜索 API...">
-      <div class="filter-list" id="filter-list"></div>
-    </div>
     <div id="settings-item" class="menu-item has-sub">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
         <circle cx="8" cy="8" r="2.6"/>
@@ -55,16 +44,42 @@
         <input type="range" id="opacity-slider" min="40" max="100" step="1" value="100">
         <span class="sub-val" id="opacity-val">100%</span>
       </div>
-      <div class="sub-row col">
-        <span class="sub-label">API Key · 余额 <em id="api-key-src"></em></span>
-        <input type="password" id="api-key-input" class="text-input" placeholder="sk-...">
-      </div>
-      <div class="sub-row col">
-        <span class="sub-label">User Token · 用量/全部API <em id="user-token-src"></em></span>
-        <input type="password" id="user-token-input" class="text-input" placeholder="platform 网页 token">
+      <div class="sub-row">
+        <span class="sub-label">自动吸附</span>
+        <div class="seg">
+          <button id="snap-on" class="seg-btn">开</button>
+          <button id="snap-off" class="seg-btn">关</button>
+        </div>
       </div>
       <div class="sub-row">
-        <span class="sub-hint">User Token 可统计该账户下所有 API · 留空读 Claude 配置/ds-watch</span>
+        <span class="sub-label">自动隐藏</span>
+        <div class="seg" id="hide-delay-seg">
+          <button class="seg-btn" data-delay="1000">1秒</button>
+          <button class="seg-btn" data-delay="2000">2秒</button>
+          <button class="seg-btn" data-delay="3000">3秒</button>
+          <button class="seg-btn" data-delay="5000">5秒</button>
+          <button class="seg-btn" data-delay="10000">10秒</button>
+        </div>
+      </div>
+      <div class="sub-row">
+        <span class="sub-label">触点大小</span>
+        <div class="seg">
+          <button id="trig-size-s" class="seg-btn" data-size="small">小</button>
+          <button id="trig-size-m" class="seg-btn" data-size="medium">中</button>
+          <button id="trig-size-l" class="seg-btn" data-size="large">大</button>
+        </div>
+      </div>
+      <div class="sub-row col">
+        <span class="sub-label">触点颜色</span>
+        <div class="swatches" id="trig-color-swatches"></div>
+      </div>
+      <div class="sub-row col">
+        <span class="sub-label">User Token · 用量/余额/全部API <em id="user-token-src"></em></span>
+        <input type="password" id="user-token-input" class="text-input" placeholder="platform 网页 token">
+        <button id="token-capture" class="seg-btn">一键登录获取</button>
+      </div>
+      <div class="sub-row">
+        <span class="sub-hint">一键登录获取即可，无需 API Key · 也支持手动粘贴</span>
         <button id="creds-save" class="seg-btn primary">保存</button>
       </div>
     </div>

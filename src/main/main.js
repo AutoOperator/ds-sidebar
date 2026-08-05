@@ -6,11 +6,18 @@ if (process.platform === 'linux' && process.getuid && process.getuid() === 0) {
   app.commandLine.appendSwitch('no-sandbox');
 }
 
+// 多实例：按 exe 所在文件夹名区分 userData，让纯净版/示范版可同时运行
+if (app.isPackaged) {
+  const exeDir = path.dirname(app.getPath('exe'));
+  app.setPath('userData', path.join(app.getPath('appData'), 'DS侧栏', path.basename(exeDir)));
+}
+
 const {
   createMainWindow,
   getMainWindow,
   createTriggerWindow,
   resizeToSize,
+  applyResizeConstraints,
   getStripSize,
   getChartSize,
 } = require('./window-manager');
@@ -19,6 +26,9 @@ const store = require('./store');
 const snapManager = require('./snap-manager');
 const menuManager = require('./menu-manager');
 const dsApi = require('./ds-api');
+const tokenCapture = require('./token-capture');
+const demo = require('./demo');
+const { encrypt } = require('./credential-store');
 
 // 单实例：未拿到锁说明已有实例在跑（或残留锁），不创建窗口
 const gotTheLock = app.requestSingleInstanceLock();
@@ -35,18 +45,26 @@ let refreshTimer = null;
 process.on('uncaughtException', (e) => console.log('[MAIN-ERR]', e));
 process.on('unhandledRejection', (e) => console.log('[MAIN-REJ]', e));
 
-// 聚合数据：余额 + 按范围用量统计
+// 聚合数据：余额 + 按范围用量统计（余额/用量互不拖累，缺一个另一个照常显示）
 async function collectData(force) {
-  try {
-    const range = store.getSettings().range || '30d';
-    const [balance, stats] = await Promise.all([
-      dsApi.getBalance(force),
-      dsApi.getStats(range, force),
-    ]);
-    return { ...stats, balance, model: dsApi.getModel(), priceMode: dsApi.getPriceMode(), now: dsApi.getNow(), updatedAt: Date.now() };
-  } catch (err) {
-    return { balance: null, error: String((err && err.message) || err) };
-  }
+  const range = store.getSettings().range || '30d';
+  const [balanceRes, statsRes] = await Promise.allSettled([
+    dsApi.getBalance(force),
+    dsApi.getStats(range, force),
+  ]);
+  const base = statsRes.status === 'fulfilled' ? statsRes.value : {};
+  const data = {
+    ...base,
+    balance: balanceRes.status === 'fulfilled' ? balanceRes.value : null,
+    model: dsApi.getModel(),
+    priceMode: dsApi.getPriceMode(),
+    now: dsApi.getNow(),
+    updatedAt: Date.now(),
+    demo: demo.isDemo(),
+    error: statsRes.status === 'fulfilled' ? undefined : String((statsRes.reason && statsRes.reason.message) || statsRes.reason),
+  };
+  if (demo.isDemo()) return demo.transform(data);
+  return data;
 }
 
 // 刷新并广播到渲染进程
@@ -90,6 +108,8 @@ function registerIpc() {
   ipcMain.handle('window:setView', (e, mode) => {
     const win = getMainWindow();
     if (win && !win.isDestroyed()) {
+      snapManager.beginViewSwitch(); // 切换期间抑制吸附判定，避免误折叠/误吸附
+      applyResizeConstraints(win, mode); // 先解锁/锁高度，再改尺寸
       const size = mode === 2 ? getChartSize() : getStripSize();
       resizeToSize(win, size);
       snapManager.setWindowSize(size);
@@ -101,10 +121,16 @@ function registerIpc() {
   ipcMain.handle('window:getState', () => store.getState());
   ipcMain.handle('settings:get', () => store.getSettings());
   ipcMain.handle('settings:update', (e, partial) => {
-    const s = store.updateSettings(partial || {});
+    const p = { ...(partial || {}) };
+    if (p.userToken !== undefined) p.userToken = encrypt(p.userToken); // 凭证落盘前 DPAPI 加密
+    const s = store.updateSettings(p);
     applyOpacity();
     const win = getMainWindow();
     if (win && !win.isDestroyed()) win.webContents.send('settings:updated', s);
+    if (partial && (partial.triggerSize !== undefined || partial.triggerColor !== undefined)) {
+      snapManager.refreshTriggerConfig(); // 触点已隐藏时即时重绘大小/颜色
+    }
+    if (partial && partial.pinned === true) snapManager.cancelMouseLeaveTimer(); // 固定后取消待触发的自动隐藏
     return s;
   });
   ipcMain.on('window:mouseEnter', () => snapManager.onMainWindowMouseEnter());
@@ -139,6 +165,17 @@ function registerIpc() {
   });
   ipcMain.handle('stats:getApiKeys', () => dsApi.getApiKeyList(true));
   ipcMain.handle('stats:getCreds', () => dsApi.getCreds());
+
+  // 一键获取 User Token：内嵌登录平台，抓到 token 后保存并刷新
+  ipcMain.handle('token:capture', async () => {
+    try {
+      const token = await tokenCapture.captureUserToken();
+      refreshAndBroadcast();
+      return { ok: true, token };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  });
 }
 
 app.whenReady().then(() => {
@@ -158,6 +195,7 @@ app.whenReady().then(() => {
   }
 
   win.setSkipTaskbar(true);
+  applyResizeConstraints(win, store.getState().viewMode === 2 ? 2 : 1);
   applyOpacity();
   win.on('closed', () => {});
 
@@ -210,6 +248,7 @@ app.whenReady().then(() => {
     win.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         win.webContents.send('view:set', 1);
+        applyResizeConstraints(win, 1);
         resizeToSize(win, getStripSize());
         await new Promise((r) => setTimeout(r, 1500));
         const v1 = await win.webContents.executeJavaScript(`(() => ({
@@ -223,6 +262,7 @@ app.whenReady().then(() => {
         await cap('view1.png');
 
         win.webContents.send('view:set', 2);
+        applyResizeConstraints(win, 2);
         resizeToSize(win, getChartSize());
         await new Promise((r) => setTimeout(r, 1500));
         const v2 = await win.webContents.executeJavaScript(`(() => ({

@@ -1,10 +1,10 @@
 {
   "name": "ds-sidebar",
   "productName": "DS侧栏",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "description": "DeepSeek 用量侧边栏：侧边吸附 + 悬浮滑出，实时余额/消耗/图表",
   "main": "src/main/main.js",
-  "author": "zhuercheng",
+  "author": "AutoOperator",
   "license": "MIT",
   "scripts": {
     "start": "electron .",

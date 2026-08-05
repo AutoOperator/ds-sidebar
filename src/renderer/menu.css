@@ -125,3 +125,20 @@ body { overflow: visible; }
 }
 #opacity-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
 .sub-val { font-size: 11px; color: var(--text); width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* 触点颜色色板 */
+.swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.swatch {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  cursor: pointer;
+  padding: 0;
+}
+.swatch:hover { transform: scale(1.15); }
+.swatch.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  transform: scale(1.15);
+}

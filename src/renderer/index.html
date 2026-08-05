@@ -19,6 +19,8 @@
 
       <!-- 视图1：一条文字  模型(点切换) | 余额 | 双倍/平价 | 今日消费(点切API) -->
       <div id="strip-info" class="strip-info">
+        <span id="si-demo" class="demo-badge hidden">示范</span>
+        <span id="si-login" class="login-badge hidden" title="点击打开设置登录">未登录·点击登录</span>
         <span class="si-model clickable" id="si-model" title="点击切换模型">--</span>
         <span class="si-sep"></span>
         <span class="si-bal" id="si-balance">余额 ¥--</span>
@@ -30,6 +32,7 @@
 
       <!-- 视图2：范围 + 统计控制 -->
       <div id="chart-header" class="chart-header hidden">
+        <span id="v2-demo" class="demo-badge hidden">示范</span>
         <span class="ch-title" id="v2-title">消费金额 · 近30天</span>
         <div class="ctrl-seg" id="range-seg">
           <button data-range="7d" class="seg-btn">近7天</button>
@@ -53,6 +56,11 @@
           <div class="mini-stat"><span class="ms-label">Tokens</span><span class="ms-value" id="v2-tokens">--</span></div>
         </div>
       </div>
+      <button id="pin-btn" class="icon-btn" title="固定(禁止拖动/吸附/自动隐藏)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
+        </svg>
+      </button>
     </div>
 
     <!-- 视图2：图表区 -->

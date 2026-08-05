@@ -47,6 +47,9 @@ contextBridge.exposeInMainWorld('api', {
     getApiKeys: () => ipcRenderer.invoke('stats:getApiKeys'),
     getCreds: () => ipcRenderer.invoke('stats:getCreds'),
   },
+  token: {
+    capture: () => ipcRenderer.invoke('token:capture'),
+  },
   snap: {
     getState: () => ipcRenderer.invoke('snap:getState'),
     expand: () => ipcRenderer.invoke('snap:expand'),

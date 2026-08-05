@@ -1,76 +1,15 @@
-// menu.js — 菜单窗口：视图切换 / 刷新 / 统计筛选(搜索+全部+各API) / 设置(主题、透明度、凭证)
+// menu.js — 菜单窗口：视图切换 / 刷新 / 设置(主题、透明度、自动吸附、触点大小/颜色、示范模式、凭证)
 (() => {
   const api = window.api;
   const $ = (id) => document.getElementById(id);
 
-  let settingsState = { theme: 'day', opacity: 1, apiFilter: 'all', range: '30d' };
-  let apiKeys = [];
+  let settingsState = { theme: 'day', opacity: 1, autoSnap: true, range: '30d', hideDelay: 3000 };
+
+  const TRIGGER_COLORS = ['#2563eb', '#8b5cf6', '#0f9d58', '#f59e0b', '#f2645f', '#00b8d9', '#e64ab6'];
 
   function measure() {
     const r = $('menu').getBoundingClientRect();
     api.menu.fit(Math.ceil(r.width), Math.ceil(r.height));
-  }
-
-  function shortSensitive(s) { return s ? '…' + s.slice(-4) : ''; }
-
-  function renderFilterList() {
-    const filter = settingsState.apiFilter; // 'all' 或 [trackingId]
-    const q = ($('filter-search').value || '').trim().toLowerCase();
-    const listEl = $('filter-list');
-    listEl.innerHTML = '';
-
-    const addRow = (label, suffix, checked, onClick) => {
-      const row = document.createElement('div');
-      row.className = 'filter-row';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = checked;
-      cb.className = 'filter-cb';
-      const span = document.createElement('span');
-      span.className = 'filter-name';
-      span.textContent = label;
-      const suf = document.createElement('span');
-      suf.className = 'filter-suf';
-      suf.textContent = suffix;
-      row.appendChild(cb);
-      row.appendChild(span);
-      row.appendChild(suf);
-      row.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
-      listEl.appendChild(row);
-    };
-
-    addRow('全部', '', filter === 'all', () => setFilter('all'));
-
-    for (const k of apiKeys) {
-      if (q && !k.name.toLowerCase().includes(q)) continue;
-      const checked = filter !== 'all' && Array.isArray(filter) && filter.includes(k.trackingId);
-      addRow(k.name, shortSensitive(k.sensitiveId), checked, () => toggleKey(k.trackingId));
-    }
-  }
-
-  function toggleKey(id) {
-    let cur = settingsState.apiFilter;
-    let list;
-    if (cur === 'all') list = apiKeys.map((k) => k.trackingId);
-    else if (Array.isArray(cur)) list = [...cur];
-    else list = apiKeys.map((k) => k.trackingId);
-
-    if (list.includes(id)) {
-      list = list.filter((x) => x !== id);
-    } else {
-      list = [...list, id];
-    }
-    if (!list.length) list = 'all';
-    else if (list.length === apiKeys.length) list = 'all';
-    setFilter(list);
-  }
-
-  function setFilter(v) {
-    settingsState.apiFilter = v;
-    api.settings.update({ apiFilter: v });
-    renderFilterList();
-    $('filter-label').textContent = v === 'all' ? '统计筛选' : '统计筛选 · ' + (Array.isArray(v) ? v.length : 0) + '项';
-    measure();
   }
 
   async function refresh() {
@@ -84,17 +23,18 @@
     const pct = Math.round((s.opacity || 1) * 100);
     $('opacity-slider').value = pct;
     $('opacity-val').textContent = pct + '%';
-    $('filter-label').textContent = (!s.apiFilter || s.apiFilter === 'all') ? '统计筛选' : '统计筛选 · ' + (Array.isArray(s.apiFilter) ? s.apiFilter.length : 0) + '项';
-    renderFilterList();
-
-    const keys = await api.stats.getApiKeys().catch(() => []);
-    if (keys && keys.length) { apiKeys = keys; renderFilterList(); measure(); }
+    $('snap-on').classList.toggle('active', s.autoSnap !== false);
+    $('snap-off').classList.toggle('active', s.autoSnap === false);
+    const hd = s.hideDelay || 3000;
+    document.querySelectorAll('#hide-delay-seg .seg-btn').forEach((b) => b.classList.toggle('active', Number(b.dataset.delay) === hd));
+    const curSize = s.triggerSize || 'small';
+    const curColor = s.triggerColor || '#2563eb';
+    document.querySelectorAll('#settings-sub [data-size]').forEach((b) => b.classList.toggle('active', b.dataset.size === curSize));
+    document.querySelectorAll('#trig-color-swatches .swatch').forEach((b) => b.classList.toggle('active', b.dataset.color === curColor));
 
     const creds = await api.stats.getCreds().catch(() => null);
     if (creds) {
-      $('api-key-input').value = creds.apiKey || '';
       $('user-token-input').value = creds.userToken || '';
-      $('api-key-src').textContent = creds.apiKeySource === 'settings' ? '· 应用设置' : (creds.apiKeySource === 'claude' ? '· Claude配置' : '');
       $('user-token-src').textContent = creds.userTokenSource === 'settings' ? '· 应用设置' : (creds.userTokenSource === 'ds-watch' ? '· ds-watch' : '');
     }
     measure();
@@ -118,14 +58,6 @@
     api.menu.close();
   });
 
-  // 统计筛选：手风琴子面板
-  $('filter-item').addEventListener('click', () => {
-    $('filter-sub').classList.toggle('hidden');
-    measure();
-  });
-  $('filter-sub').addEventListener('click', (e) => e.stopPropagation());
-  $('filter-search').addEventListener('input', () => { renderFilterList(); measure(); });
-
   // 设置：手风琴子面板
   $('settings-item').addEventListener('click', () => {
     $('settings-sub').classList.toggle('hidden');
@@ -142,16 +74,58 @@
     await api.settings.update({ opacity: $('opacity-slider').value / 100 });
   });
 
+  // 自动吸附开关
+  $('snap-on').addEventListener('click', async () => { await api.settings.update({ autoSnap: true }); refresh(); });
+  $('snap-off').addEventListener('click', async () => { await api.settings.update({ autoSnap: false }); refresh(); });
+
+  // 自动隐藏延迟（鼠标离开后隐藏到侧边的时间）
+  document.querySelectorAll('#hide-delay-seg .seg-btn').forEach((b) => {
+    b.addEventListener('click', async () => { await api.settings.update({ hideDelay: Number(b.dataset.delay) }); refresh(); });
+  });
+
+  // 触点大小（小/中/大）
+  document.querySelectorAll('#settings-sub [data-size]').forEach((b) => {
+    b.addEventListener('click', async () => { await api.settings.update({ triggerSize: b.dataset.size }); refresh(); });
+  });
+
+  // 触点颜色（7 色板）
+  const swatchBox = $('trig-color-swatches');
+  TRIGGER_COLORS.forEach((c) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch';
+    b.dataset.color = c;
+    b.style.background = c;
+    b.title = c;
+    b.addEventListener('click', async () => { await api.settings.update({ triggerColor: c }); refresh(); });
+    swatchBox.appendChild(b);
+  });
+
+  $('token-capture').addEventListener('click', async () => {
+    const btn = $('token-capture');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '等待登录…';
+    const res = await api.token.capture().catch(() => ({ ok: false, error: '调用失败' }));
+    if (res && res.ok) {
+      $('user-token-input').value = res.token || '';
+      btn.textContent = '已获取 ✓';
+      const creds = await api.stats.getCreds().catch(() => null);
+      if (creds) $('user-token-src').textContent = creds.userTokenSource === 'settings' ? '· 应用设置' : '';
+    } else {
+      btn.textContent = '获取失败';
+    }
+    setTimeout(() => { btn.textContent = '一键登录获取'; btn.disabled = false; }, 2000);
+  });
+
   $('creds-save').addEventListener('click', async () => {
-    const apiKey = $('api-key-input').value.trim();
     const userToken = $('user-token-input').value.trim();
-    await api.settings.update({ apiKey: apiKey, userToken: userToken });
+    await api.settings.update({ userToken: userToken });
     const btn = $('creds-save');
     btn.textContent = '已保存';
     setTimeout(() => { btn.textContent = '保存'; }, 1200);
     const creds = await api.stats.getCreds().catch(() => null);
     if (creds) {
-      $('api-key-src').textContent = creds.apiKeySource === 'settings' ? '· 应用设置' : (creds.apiKeySource === 'claude' ? '· Claude配置' : '');
       $('user-token-src').textContent = creds.userTokenSource === 'settings' ? '· 应用设置' : (creds.userTokenSource === 'ds-watch' ? '· ds-watch' : '');
     }
   });

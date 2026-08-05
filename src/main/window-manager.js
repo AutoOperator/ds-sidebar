@@ -35,12 +35,23 @@ function resizeToSize(win, size) {
   return { x, y, ...size };
 }
 
-// 触点尺寸配置
+// 按视图模式限制手动拉伸方向：短条=高度锁死只横向可拉，图表=双向自由
+function applyResizeConstraints(win, mode) {
+  if (!win || win.isDestroyed()) return;
+  if (mode === 2) {
+    win.setMinimumSize(380, 40);
+    win.setMaximumSize(10000, 10000);
+  } else {
+    win.setMinimumSize(380, 40);
+    win.setMaximumSize(10000, 40);
+  }
+}
+
+// 触点尺寸配置（3 档，小=当前默认 50；左上角锚点不变）
 const TRIGGER_SIZES = {
-  small:      { length: 60,  thickness: 3 },
-  medium:     { length: 100, thickness: 5 },
-  large:      { length: 160, thickness: 7 },
-  transparent:{ length: 160, thickness: 7 },
+  small:  { length: 50,  thickness: 5 },
+  medium: { length: 75,  thickness: 6 },
+  large:  { length: 100, thickness: 7 },
 };
 
 const ALWAYS_ON_TOP_LEVEL = 'screen-saver';
@@ -111,7 +122,7 @@ function createTriggerWindow() {
 
 // 触点位置：默认居中，若给了窗口当前位置则跟随窗口（偏中上/中左）
 function getTriggerBounds(edge, sizeName, currentBounds) {
-  const size = TRIGGER_SIZES[sizeName] || TRIGGER_SIZES.medium;
+  const size = TRIGGER_SIZES[sizeName] || TRIGGER_SIZES.small;
   const display = screen.getPrimaryDisplay();
   const { width: sw, height: sh } = display.workAreaSize;
   const { x: wx, y: wy } = display.workArea;
@@ -170,6 +181,7 @@ module.exports = {
   getTriggerBounds,
   getExpandedBounds,
   resizeToSize,
+  applyResizeConstraints,
   getStripSize,
   getChartSize,
   TRIGGER_SIZES,

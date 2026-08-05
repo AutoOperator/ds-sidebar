@@ -1,12 +1,14 @@
 // ds-api.js — DeepSeek 数据获取（余额 + 按 API Key × 模型 × 天 的用量）
-// 数据源：
-//   余额      GET https://api.deepseek.com/user/balance              (Bearer API key)
+// 数据源（全部只需 User Token，余额优先走平台接口，API Key 仅作回退）：
+//   余额      GET https://platform.deepseek.com/api/v0/users/get_user_summary      (Bearer user_token)
+//   余额回退  GET https://api.deepseek.com/user/balance                            (Bearer API key)
 //   用量      GET https://platform.deepseek.com/api/v0/usage/by_api_key/{amount,cost}  (Bearer user_token)
 //   密钥列表  GET https://platform.deepseek.com/api/v0/users/get_api_keys             (Bearer user_token)
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const store = require('./store');
+const { decrypt } = require('./credential-store');
 
 const DS_WATCH_DIR = path.join(os.homedir(), '.claude', 'ds-watch');
 const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
@@ -32,7 +34,7 @@ function getApiKey() {
 
 function getUserToken() {
   const s = store.getSettings();
-  if (s.userToken) return s.userToken;
+  if (s.userToken) return decrypt(s.userToken);
   if (cleanMode()) return null;
   try { return fs.readFileSync(path.join(DS_WATCH_DIR, 'user_token'), 'utf8').trim(); } catch { return null; }
 }
@@ -90,9 +92,25 @@ async function fetchJson(url, headers, timeout = 10000) {
 
 // ── 余额（30s 缓存）──
 let balCache = { value: null, ts: 0 };
+// User Token 余额：平台 get_user_summary（网页右上角同款接口，只认 User Token）
+async function getSummaryBalance(token) {
+  const j = await fetchJson('https://platform.deepseek.com/api/v0/users/get_user_summary', {
+    ...BROWSER_HEADERS,
+    'Authorization': 'Bearer ' + token,
+  });
+  const wallets = j.data && j.data.biz_data && j.data.biz_data.normal_wallets;
+  return (wallets && wallets.length) ? parseFloat(wallets[0].balance) : null;
+}
 async function getBalance(force) {
   const now = Date.now();
   if (!force && balCache.value !== null && now - balCache.ts < 30000) return balCache.value;
+  const token = getUserToken();
+  if (token) {
+    try {
+      const v = await getSummaryBalance(token);
+      if (v != null) { balCache = { value: v, ts: now }; return v; }
+    } catch { /* 平台余额失败 → 回退 API Key */ }
+  }
   const key = getApiKey();
   if (!key) return balCache.value;
   try {
@@ -255,7 +273,7 @@ function getCreds() {
   return {
     apiKey: s.apiKey || claudeKey,
     apiKeySource: s.apiKey ? 'settings' : (claudeKey ? 'claude' : 'none'),
-    userToken: s.userToken || fileToken || '',
+    userToken: decrypt(s.userToken) || fileToken || '',
     userTokenSource: s.userToken ? 'settings' : (fileToken ? 'ds-watch' : 'none'),
   };
 }

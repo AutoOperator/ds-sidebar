@@ -38,6 +38,12 @@ function load() {
   }
   if (state.settings.range == null) state.settings.range = '30d';
   if (state.settings.apiFilter == null) state.settings.apiFilter = 'all';
+  if (state.settings.autoSnap == null) state.settings.autoSnap = true;
+  if (state.settings.pinned == null) state.settings.pinned = false;
+  if (state.settings.demo == null) state.settings.demo = false;
+  if (state.settings.triggerSize == null) state.settings.triggerSize = 'small';
+  if (state.settings.triggerColor == null) state.settings.triggerColor = '#2563eb';
+  if (state.settings.hideDelay == null) state.settings.hideDelay = 3000;
   // apiKey / userToken 可选：为空时 ds-api 回退到 Claude 配置 / ds-watch
   return state;
 }

@@ -71,6 +71,8 @@ html, body {
   padding: 0 4px;
   -webkit-app-region: drag;
 }
+/* 固定(pinned)：整条不可拖动 */
+#app.pinned #topbar { -webkit-app-region: no-drag; }
 
 .icon-btn {
   width: 26px; height: 26px;
@@ -84,6 +86,7 @@ html, body {
 }
 .icon-btn:hover { background: var(--btn-hover); color: var(--accent); }
 .icon-btn:active { background: var(--panel-border); }
+.icon-btn.active { color: var(--accent); background: var(--accent-soft); }
 
 /* ── 视图1：一条文字 ── */
 .strip-info {
@@ -201,5 +204,23 @@ html, body {
 #chart-area::-webkit-scrollbar { width: 0; }
 .chart.main { flex: 1; min-height: 0; width: 100%; }
 .foot { text-align: center; font-size: 10px; color: var(--text-2); margin-top: 4px; }
+
+.demo-badge {
+  flex: 0 0 auto;
+  font-size: 9px; font-weight: 700;
+  color: #fff; background: #f2645f;
+  border-radius: 7px; padding: 1px 6px;
+  -webkit-app-region: no-drag;
+}
+
+.login-badge {
+  flex: 0 0 auto;
+  font-size: 10px; font-weight: 700;
+  color: #fff; background: var(--cost);
+  border-radius: 7px; padding: 1px 8px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.login-badge:hover { filter: brightness(1.15); }
 
 .hidden { display: none !important; }
