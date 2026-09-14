@@ -59,4 +59,8 @@ DeepSeek 用量侧边栏：侧边吸附 + 悬浮滑出，实时余额/今日消�
 - `--screenshot` 自检会在开始时存档、结束时还原整份 state（含 settings），所以自检里点过的范围不会残留。
 - 触点窗口必须独立置顶（screen-saver 层级），否则吸附后会被其他窗口盖住。
 - 打包时 `--out` 指向别的目录后，electron-packager 不再自动忽略 `dist/`，会把旧绿色包塞进 asar（见过 444MB 的包）；`tools/build.js` 已显式 `--ignore` 排除 `shots/` 与 `dist/`。
+- `npm run dist` 报 `EBUSY: resource busy or locked, unlink '...app.asar'`（bash 下是 `Device or resource busy`）**不是代码问题**：有进程对该文件持有句柄且不允许删除，而 electron-packager `--overwrite` 必须先删掉旧输出目录，一个文件删不掉整个打包就中断。
+  - 查占用者：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\who-locks.ps1`（用 Windows Restart Manager API，会打印 PID/进程名/路径）。实测占用者不是 DS侧栏.exe，而是编辑器/索引/同步类进程（本项目里曾抓到 ZCode 自己）。
+  - 绕法：关掉占用进程后重打包，或换一个 `--out` 目录打包（本次 v1.5.0/v1.6.0 的发布包都是这么出的）。
+  - 注意 `tools/who-locks.ps1` 必须保持纯 ASCII：PowerShell 5.1 会把无 BOM 的 .ps1 按 ANSI(GBK) 解码，脚本里写中文路径会被静默解坏，出现"文件明明在却报不存在"的假象。
 - `tools/deploy.js` 部署时会清空目标目录但保留 `config/`（凭证在里面），别改回整体删除。
