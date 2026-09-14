@@ -72,18 +72,35 @@ function synthDate(offsetDays) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// 未登录/无数据时按当前粒度合成桶（小时级 24 个 / 天级 30 个）
-function synthBuckets(hourly) {
-  const rand = mulberry32(hashStr('demo-synth'));
-  const n = hourly ? 24 : 30;
-  let cost = hourly ? 0.4 : 8, tokens = hourly ? 20000 : 200000, reqs = hourly ? 40 : 400;
+// 未登录/无数据时按当前范围合成桶（小时级 24 个；天级按起止日期算天数）
+function synthBuckets(data) {
+  const hourly = data.granularity === 'hour';
+  const dayCount = (() => {
+    if (!data.rangeStart || !data.rangeEnd) return 30;
+    const d0 = Date.parse(data.rangeStart + 'T00:00:00Z');
+    const d1 = Date.parse(data.rangeEnd + 'T00:00:00Z');
+    if (isNaN(d0) || isNaN(d1)) return 30;
+    const n = Math.round((d1 - d0) / 86400000) + 1;
+    return n >= 1 && n <= 366 ? n : 30;
+  })();
+  const rand = mulberry32(hashStr('demo-synth:' + (data.rangeLabel || '')));
+  const n = hourly ? 24 : dayCount;
+  let cost = hourly ? 0.4 : 8 / dayCount, tokens = hourly ? 20000 : 200000, reqs = hourly ? 40 : 400;
   const buckets = [];
   for (let i = 0; i < n; i++) {
-    cost += rand() * (hourly ? 0.3 : 2);
+    cost += rand() * (hourly ? 0.3 : 2 / dayCount);
     tokens += Math.round(rand() * (hourly ? 4000 : 40000));
     reqs += Math.round(rand() * (hourly ? 8 : 60));
-    const label = hourly ? String(i).padStart(2, '0') + ':00' : synthDate(n - 1 - i).slice(5);
-    buckets.push({ t: i, label, full: hourly ? '今日 ' + label : synthDate(n - 1 - i), cells: fakeCells('synth:' + i, { cost, tokens, reqs }) });
+    let label, full;
+    if (hourly) {
+      label = String(i).padStart(2, '0') + ':00';
+      full = '今日 ' + label;
+    } else {
+      const d = new Date(Date.parse((data.rangeEnd || synthDate(0)) + 'T00:00:00Z') - (n - 1 - i) * 86400000);
+      full = d.toISOString().slice(0, 10);
+      label = full.slice(5);
+    }
+    buckets.push({ t: i, label, full, cells: fakeCells('synth:' + full, { cost, tokens, reqs }) });
   }
   return buckets;
 }
@@ -99,10 +116,9 @@ function aggregate(buckets) {
 
 function transform(data) {
   const srcBuckets = (data.buckets || []).filter((b) => b && b.t != null && b.label != null);
-  const hourly = data.granularity === 'hour';
   const buckets = srcBuckets.length
     ? srcBuckets.map((b) => ({ ...b, cells: fakeCells(b.full || b.label, bucketTotals(b.cells)) }))
-    : synthBuckets(hourly);
+    : synthBuckets(data);
 
   // 今日：优先用真实今日伪造，否则取最后一个桶
   const today = (data.today && Object.keys(data.today.cells || {}).length)
