@@ -44,7 +44,7 @@ function load() {
   if (state.settings.triggerSize == null) state.settings.triggerSize = 'small';
   if (state.settings.triggerColor == null) state.settings.triggerColor = '#2563eb';
   if (state.settings.hideDelay == null) state.settings.hideDelay = 3000;
-  // apiKey / userToken 可选：为空时 ds-api 回退到 Claude 配置 / ds-watch
+  // userToken 可选：为空时 ds-api 回退到 ds-watch 文件（凭证只用 User Token，不用 API Key）
   return state;
 }
 

@@ -1,19 +1,20 @@
 // ds-api.js — DeepSeek 数据获取（余额 + 按 API Key × 模型 × 天 的用量）
-// 数据源（全部只需 User Token，余额优先走平台接口，API Key 仅作回退）：
-//   余额      GET https://platform.deepseek.com/api/v0/users/get_user_summary      (Bearer user_token)
-//   余额回退  GET https://api.deepseek.com/user/balance                            (Bearer API key)
+// 只认 User Token，不碰 API Key（API Key 输入框 v1.4.0 已删；旧代码会拿它回退请求余额，
+// 但那还要求读 ~/.claude/settings.json 里 Claude 的 ANTHROPIC_AUTH_TOKEN —— 跨项目用凭证，已拆掉）：
+//   余额      GET https://platform.deepseek.com/api/v0/users/get_user_summary          (Bearer user_token)
 //   用量      GET https://platform.deepseek.com/api/v0/usage/by_api_key/{amount,cost}  (Bearer user_token)
-//   密钥列表  GET https://platform.deepseek.com/api/v0/users/get_api_keys             (Bearer user_token)
+//   密钥列表  GET https://platform.deepseek.com/api/v0/users/get_api_keys              (Bearer user_token)
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const store = require('./store');
 const { decrypt } = require('./credential-store');
+const pricing = require('../shared/pricing');
 
 const DS_WATCH_DIR = path.join(os.homedir(), '.claude', 'ds-watch');
 const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
-const HOUR_8 = 8 * 3600 * 1000;
-const DAY = 86400000;
+const HOUR_8 = pricing.HOUR_8;
+const DAY = pricing.DAY;
 const CACHE_TTL = 60000;
 
 // 纯净模式：设置 DS_CLEAN_MODE=1 时不回退读取 ~/.claude 配置，仅用应用内设置的凭证
@@ -23,48 +24,31 @@ function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 }
 
-// ── 凭证：优先应用设置，其次 Claude 配置 / ds-watch（纯净模式禁用回退）──
-function getApiKey() {
-  const s = store.getSettings();
-  if (s.apiKey) return s.apiKey;
-  if (cleanMode()) return '';
-  const cfg = readJson(SETTINGS_PATH, {});
-  return (cfg.env && cfg.env.ANTHROPIC_AUTH_TOKEN) || '';
-}
-
+// ── 凭证：只用 User Token（应用设置 → ds-watch 文件；纯净模式禁用回退）──
 function getUserToken() {
   const s = store.getSettings();
-  if (s.userToken) return decrypt(s.userToken);
+  // 应用内保存过就用它；解密失败（换了机器/用户，DPAPI 解不开）再回退 ds-watch 文件
+  const saved = s.userToken ? decrypt(s.userToken) : '';
+  if (saved) return saved;
   if (cleanMode()) return null;
   try { return fs.readFileSync(path.join(DS_WATCH_DIR, 'user_token'), 'utf8').trim(); } catch { return null; }
 }
 
+// 当前模型名：必须原样返回配置里的值，才能和用量接口里的 model 字段对上（不做新旧名归一）。
+// 仅在没有任何配置时兜底用官方现名 deepseek-flash（旧名 deepseek-v4-flash 已退役，
+// 现已由 deepseek-flash 承载；deepseek-v4-pro 仍在服务）。
 function getModel() {
-  if (cleanMode()) return 'deepseek-v4-flash';
+  if (cleanMode()) return 'deepseek-flash';
   const s = readJson(SETTINGS_PATH, {});
   const env = s.env || {};
-  return env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'deepseek-v4-flash';
+  return env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'deepseek-flash';
 }
 
 // 北京时间（平台按北京日期切天）
-function bjParts() {
-  const d = new Date(Date.now() + HOUR_8);
-  return {
-    y: d.getUTCFullYear(),
-    m: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-    h: d.getUTCHours(),
-    min: d.getUTCMinutes(),
-    s: d.getUTCSeconds(),
-  };
-}
+const bjParts = () => pricing.bjParts();
 
-// 价格模式：DeepSeek 繁忙时段 9-12 / 14-18（北京时间）= 双倍，其余平价
-function getPriceMode() {
-  const h = bjParts().h;
-  if ((h >= 9 && h < 12) || (h >= 14 && h < 18)) return { mode: '双倍', busy: true };
-  return { mode: '平价', busy: false };
-}
+// 价格模式：工作日 9-12 / 14-18（北京时间）= 高峰，其余（含周末全天）= 低谷
+const getPriceMode = () => pricing.getPriceMode();
 
 function getNow() {
   const b = bjParts();
@@ -109,20 +93,8 @@ async function getBalance(force) {
     try {
       const v = await getSummaryBalance(token);
       if (v != null) { balCache = { value: v, ts: now }; return v; }
-    } catch { /* 平台余额失败 → 回退 API Key */ }
+    } catch { /* 平台余额失败：沿用上次的值，不再回退 API Key */ }
   }
-  const key = getApiKey();
-  if (!key) return balCache.value;
-  try {
-    const data = await fetchJson('https://api.deepseek.com/user/balance', {
-      'Accept': 'application/json',
-      'Authorization': 'Bearer ' + key,
-    });
-    if (data.is_available && data.balance_infos && data.balance_infos.length) {
-      balCache = { value: parseFloat(data.balance_infos[0].total_balance), ts: now };
-      return balCache.value;
-    }
-  } catch { /* 网络失败：返回缓存 */ }
   return balCache.value;
 }
 
@@ -265,16 +237,15 @@ async function getApiKeyList(force) {
 // ── 设置页回显凭证（含来源）──
 function getCreds() {
   const s = store.getSettings();
-  const claudeKey = !cleanMode() && (readJson(SETTINGS_PATH, {}).env || {}).ANTHROPIC_AUTH_TOKEN || '';
   let fileToken = null;
   if (!cleanMode()) {
     try { fileToken = fs.readFileSync(path.join(DS_WATCH_DIR, 'user_token'), 'utf8').trim(); } catch { /* 忽略 */ }
   }
+  // 来源按"实际取到的值"报，解密失败（换机器/换用户）时不要谎报成 settings
+  const savedToken = decrypt(s.userToken);
   return {
-    apiKey: s.apiKey || claudeKey,
-    apiKeySource: s.apiKey ? 'settings' : (claudeKey ? 'claude' : 'none'),
-    userToken: decrypt(s.userToken) || fileToken || '',
-    userTokenSource: s.userToken ? 'settings' : (fileToken ? 'ds-watch' : 'none'),
+    userToken: savedToken || fileToken || '',
+    userTokenSource: savedToken ? 'settings' : (fileToken ? 'ds-watch' : 'none'),
   };
 }
 

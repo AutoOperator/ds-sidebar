@@ -48,19 +48,13 @@
     return n.length > 8 ? n.slice(0, 7) + '…' : n;
   };
 
-  // ── 北京时间 + 价格模式 ──
-  function bjParts() {
-    const d = new Date(Date.now() + 8 * 3600 * 1000);
-    return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, day: d.getUTCDate(), h: d.getUTCHours(), min: d.getUTCMinutes(), s: d.getUTCSeconds() };
-  }
-  const localPriceMode = () => {
-    const h = bjParts().h;
-    return (h >= 9 && h < 12) || (h >= 14 && h < 18) ? { mode: '双倍', busy: true } : { mode: '平价', busy: false };
-  };
+  // ── 北京时间 + 价格模式（规则来自 shared/pricing.js，与主进程同一份实现）──
+  const localPriceMode = () => window.Pricing.getPriceMode();
   function renderPrice(pm) {
     const p = pm || localPriceMode();
     els.siPrice.textContent = p.mode;
     els.siPrice.className = 'si-price ' + (p.busy ? 'busy' : 'free');
+    els.siPrice.title = p.tip || '';
   }
   setInterval(() => renderPrice(), 30000);
 
@@ -154,13 +148,20 @@
     return all.filter((id) => filter.includes(id));
   }
 
+  // 模型配色。现役：deepseek-flash（旧名 deepseek-v4-flash 已退役但历史用量行仍会返回）、
+  // deepseek-v4-pro、deepseek-v4-flash-vision-exp。旧别名 deepseek-chat / deepseek-reasoner
+  // 由 V4 Flash 承载，故保留其在旧图表里的绿色。未知模型走哈希取色。
+  const MODEL_COLORS = {
+    'deepseek-flash': () => cssVar('--accent'),
+    'deepseek-v4-pro': () => '#8b5cf6',
+    'deepseek-v4-flash-vision-exp': () => '#00b8d9',
+    'deepseek-v4-flash': () => '#5ac8fa',
+    'deepseek-chat & deepseek-reasoner': () => '#0f9d58',
+  };
+
   function modelColor(m) {
-    const map = {
-      'deepseek-v4-flash': cssVar('--accent'),
-      'deepseek-v4-pro': '#8b5cf6',
-      'deepseek-chat & deepseek-reasoner': '#0f9d58',
-    };
-    if (map[m]) return map[m];
+    const hit = MODEL_COLORS[m];
+    if (hit) return hit();
     let h = 0;
     for (const ch of m) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     return PALETTE[h % PALETTE.length];

@@ -7,7 +7,7 @@ const isDemo = () => !!(store.getSettings().demo || process.env.DS_DEMO === '1')
 
 const DEMO_NAMES = ['示例api1', '示例api2', '示例api3', '示例api4', '示例api5'];
 const KEY_IDS = ['demo-key-1', 'demo-key-2', 'demo-key-3', 'demo-key-4', 'demo-key-5'];
-const MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+const MODELS = ['deepseek-flash', 'deepseek-v4-pro'];
 
 // mulberry32 伪随机：固定种子 → 同一日期数据稳定，刷新不跳变
 function mulberry32(seed) {

@@ -4,6 +4,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { deploy } = require('./deploy');
 
 const root = path.join(__dirname, '..');
 const vendorDir = path.join(root, 'src', 'renderer', 'vendor');
@@ -37,18 +38,6 @@ execSync(
 // 4. 可选：部署到 DS_DEPLOY_DIR 指定的目录
 if (deployDir) {
   console.log('[3/3] 部署到 ' + deployDir);
-  fs.rmSync(deployDir, { recursive: true, force: true });
-  fs.mkdirSync(deployDir, { recursive: true });
-  const copyDir = (src, dest) => {
-    fs.mkdirSync(dest, { recursive: true });
-    for (const name of fs.readdirSync(src)) {
-      const s = path.join(src, name);
-      const d = path.join(dest, name);
-      const st = fs.statSync(s);
-      if (st.isDirectory()) copyDir(s, d);
-      else fs.copyFileSync(s, d);
-    }
-  };
-  copyDir(outDir, deployDir);
+  deploy(outDir, deployDir);
   console.log('✅ 完成：' + deployDir);
 }

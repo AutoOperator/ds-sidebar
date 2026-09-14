@@ -28,7 +28,7 @@ const menuManager = require('./menu-manager');
 const dsApi = require('./ds-api');
 const tokenCapture = require('./token-capture');
 const demo = require('./demo');
-const { encrypt } = require('./credential-store');
+const { encrypt, decrypt, isEncrypted } = require('./credential-store');
 
 // 单实例：未拿到锁说明已有实例在跑（或残留锁），不创建窗口
 const gotTheLock = app.requestSingleInstanceLock();
@@ -93,6 +93,16 @@ function applyOpacity() {
   if (win && !win.isDestroyed()) {
     win.setOpacity(Math.max(0.35, Math.min(1, store.getSettings().opacity)));
   }
+}
+
+// 一次性迁移：v1.4 及更早落盘的 userToken 其实是明文（加密是后来才加的，老数据没被动过）。
+// 升级为密文；加密不可用或往返校验不通过就原样保留，不会弄丢凭证。
+// settings 里若残留 apiKey 字段不再处理——应用已不读它（见 ds-api.js 的说明）。
+function migrateCredentialEncryption() {
+  const plain = store.getSettings().userToken;
+  if (!plain || isEncrypted(plain)) return;
+  const enc = encrypt(plain);
+  if (enc !== plain && decrypt(enc) === plain) store.updateSettings({ userToken: enc });
 }
 
 function registerIpc() {
@@ -181,6 +191,7 @@ function registerIpc() {
 app.whenReady().then(() => {
   if (!gotTheLock) return;
   registerIpc();
+  migrateCredentialEncryption();
 
   const win = createMainWindow();
 
@@ -232,8 +243,20 @@ app.whenReady().then(() => {
   // 自动验证 + 截图模式（--screenshot）：保持窗口可见，检查后退出
   if (process.argv.includes('--screenshot')) {
     const fs = require('fs');
-    const shotsDir = path.join(__dirname, '..', '..', 'shots');
-    fs.mkdirSync(shotsDir, { recursive: true });
+    // 打包后 __dirname 在 app.asar 里（只读），回退到临时目录，让打包版也能自检
+    const shotsDir = (() => {
+      const local = path.join(__dirname, '..', '..', 'shots');
+      try { fs.mkdirSync(local, { recursive: true }); return local; }
+      catch {
+        const tmp = path.join(app.getPath('temp'), 'ds-sidebar-shots');
+        fs.mkdirSync(tmp, { recursive: true });
+        return tmp;
+      }
+    })();
+    const probe = {};
+    console.log('[SHOTS]', shotsDir);
+    // 截图会改窗口尺寸/视图，这里先存档、跑完还原，避免污染真实配置
+    const prevState = JSON.parse(JSON.stringify(store.getState()));
     win.setOpacity(1);
     win.webContents.on('console-message', (e, level, msg) => {
       if (level >= 2) console.log('[RENDERER]', msg);
@@ -251,14 +274,21 @@ app.whenReady().then(() => {
         applyResizeConstraints(win, 1);
         resizeToSize(win, getStripSize());
         await new Promise((r) => setTimeout(r, 1500));
-        const v1 = await win.webContents.executeJavaScript(`(() => ({
+        const v1 = await win.webContents.executeJavaScript(`(async () => ({
           model: document.getElementById('si-model').textContent,
           price: document.getElementById('si-price').textContent,
+          priceTip: document.getElementById('si-price').title,
+          pricingLoaded: typeof window.Pricing,
           today: document.getElementById('si-today').textContent,
           balance: document.getElementById('si-balance').textContent,
+          creds: await window.api.stats.getCreds().then((c) => ({
+            tokenOk: (c.userToken || '').length > 10, tokenSource: c.userTokenSource,
+            leaksApiKey: 'apiKey' in c, // 必须为 false：应用只认 User Token
+          })).catch((e) => 'ERR:' + e.message),
           w: window.innerWidth, h: window.innerHeight,
         }))()`);
         console.log('[V1-STRIP]', JSON.stringify(v1));
+        probe.v1 = v1;
         await cap('view1.png');
 
         win.webContents.send('view:set', 2);
@@ -270,6 +300,10 @@ app.whenReady().then(() => {
           rangeBtns: document.querySelectorAll('#range-seg .seg-btn').length,
           groupBtns: document.querySelectorAll('#group-seg .seg-btn').length,
           title: document.getElementById('v2-title').textContent,
+          statBoxes: [...document.querySelectorAll('.mini-stat')].map((e) => {
+            const v = e.querySelector('.ms-value');
+            return { text: v.textContent, w: v.clientWidth, need: v.scrollWidth, truncated: v.scrollWidth > v.clientWidth };
+          }),
           mainChartPixels: (() => {
             const c = document.querySelector('#main-chart canvas');
             if (!c) return -1;
@@ -280,9 +314,13 @@ app.whenReady().then(() => {
           })(),
         }))()`);
         console.log('[V2-CHART]', JSON.stringify(v2));
+        probe.v2 = v2;
+        // 打包版 stdout 不接控制台，把探针结果落盘，两种形态都能核对
+        fs.writeFileSync(path.join(shotsDir, 'probe.json'), JSON.stringify(probe, null, 2));
         await cap('view2.png');
         snapManager.unsnap();
         win.show();
+        store.update(prevState); // 最后还原，确保截图过程写下的窗口位置/视图不落盘
         setTimeout(() => app.quit(), 300);
       }, 500);
     });

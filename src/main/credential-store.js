@@ -9,6 +9,8 @@ function canEncrypt() {
   try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
 }
 
+const isEncrypted = (v) => typeof v === 'string' && v.startsWith(PREFIX);
+
 // 幂等加密：空值/已是密文原样返回
 function encrypt(plain) {
   if (!plain || typeof plain !== 'string') return plain;
@@ -28,4 +30,4 @@ function decrypt(stored) {
   } catch { return ''; }
 }
 
-module.exports = { encrypt, decrypt };
+module.exports = { encrypt, decrypt, isEncrypted };
