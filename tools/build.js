@@ -29,9 +29,12 @@ execSync(`node "${path.join(__dirname, 'gen-icons.js')}"`, { stdio: 'inherit' })
 const iconFlag = fs.existsSync(path.join(root, 'build', 'app.ico'))
   ? ` --icon="${path.join(root, 'build', 'app.ico')}"`
   : '';
+// shots/ 是 --screenshot 自检产物（截图与 probe.json 里有真实用量派生的数字），
+// 绝不能打进发布包；dist/ 一并排除（改过 --out 时它不再被自动忽略）。
+const ignoreFlag = ` --ignore="[\\\\/](shots|dist)[\\\\/]"`;
 console.log('[2/3] electron-packager 打包中…');
 execSync(
-  `npx electron-packager . "DS侧栏" --platform=win32 --arch=x64 --out=dist --overwrite --asar${iconFlag}`,
+  `npx electron-packager . "DS侧栏" --platform=win32 --arch=x64 --out=dist --overwrite --asar${iconFlag}${ignoreFlag}`,
   { stdio: 'inherit', cwd: root }
 );
 
