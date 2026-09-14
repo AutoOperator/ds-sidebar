@@ -7,8 +7,9 @@ let mainWindow = null;
 let triggerWindow = null;
 
 // 窗口尺寸：细条模式（一条文字）与图表模式（横向展开成更宽的矩形）
+// 图表宽度从 800 提到 900：表头挤了三张统计卡，800 下"16.24亿"这类数值会被截断
 const STRIP_SIZE = { width: 600, height: 40 };
-const CHART_SIZE = { width: 800, height: 420 };
+const CHART_SIZE = { width: 900, height: 420 };
 
 function getStripSize() { return { ...STRIP_SIZE }; }
 function getChartSize() { return { ...CHART_SIZE }; }

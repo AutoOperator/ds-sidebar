@@ -32,48 +32,39 @@ const KEY_PROFILE = (() => {
   return w.map((x) => x / s);
 })();
 
-function dayTotals(d) {
+function bucketTotals(cells) {
   let cost = 0, tokens = 0, reqs = 0;
-  for (const kid of Object.keys(d.cells || {})) {
-    for (const m of Object.keys(d.cells[kid])) {
-      const c = d.cells[kid][m] || {};
+  for (const kid of Object.keys(cells || {})) {
+    for (const m of Object.keys(cells[kid])) {
+      const c = cells[kid][m] || {};
       cost += c.c || 0; tokens += c.t || 0; reqs += c.r || 0;
     }
   }
   return { cost, tokens, reqs };
 }
 
-// 某天的伪造数据：真实当日总量 ×10 ± 抖动，摊到 5 示例key × 2 模型
-function fakeDay(date, real) {
-  const rand = mulberry32(hashStr('demo:' + date));
-  const dayScale = 10 + (rand() * 0.8 - 0.4); // ×10 ±40%
+// 某个桶的伪造数据：真实量 ×10 ± 抖动，摊到 5 示例key × 2 模型
+function fakeCells(seedKey, real) {
+  const rand = mulberry32(hashStr('demo:' + seedKey));
+  const scale = 10 + (rand() * 0.8 - 0.4); // ×10 ±40%
   const cost = Math.max(real.cost, 0.01), tokens = Math.max(real.tokens, 0), reqs = Math.max(real.reqs, 0);
   const cells = {};
   for (let i = 0; i < DEMO_NAMES.length; i++) {
     const kf = KEY_PROFILE[i] * (0.85 + rand() * 0.3);
     cells[KEY_IDS[i]] = {
       [MODELS[0]]: {
-        c: +(cost * dayScale * kf * 0.6).toFixed(2),
-        t: Math.round(tokens * dayScale * kf * 0.6),
-        r: Math.round(reqs * dayScale * kf * 0.6),
+        c: +(cost * scale * kf * 0.6).toFixed(2),
+        t: Math.round(tokens * scale * kf * 0.6),
+        r: Math.round(reqs * scale * kf * 0.6),
       },
       [MODELS[1]]: {
-        c: +(cost * dayScale * kf * 0.4).toFixed(2),
-        t: Math.round(tokens * dayScale * kf * 0.4),
-        r: Math.round(reqs * dayScale * kf * 0.4),
+        c: +(cost * scale * kf * 0.4).toFixed(2),
+        t: Math.round(tokens * scale * kf * 0.4),
+        r: Math.round(reqs * scale * kf * 0.4),
       },
     };
   }
-  return { date, cells };
-}
-
-function aggregate(days) {
-  const t = { cost: 0, tokens: 0, requests: 0 };
-  for (const d of days) {
-    const r = dayTotals(d);
-    t.cost += r.cost; t.tokens += r.tokens; t.requests += r.reqs;
-  }
-  return t;
+  return cells;
 }
 
 function synthDate(offsetDays) {
@@ -81,33 +72,42 @@ function synthDate(offsetDays) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function transform(data) {
-  const realDays = (data.days || []).filter((d) => d && d.date);
-  let days;
-  if (realDays.length) {
-    days = realDays.map((d) => fakeDay(d.date, dayTotals(d)));
-  } else {
-    // 未登录/无数据：合成近30天，金额递增
-    const rand = mulberry32(hashStr('demo-synth'));
-    let cost = 8, tokens = 200000, reqs = 400;
-    days = [];
-    for (let i = 29; i >= 0; i--) {
-      cost += rand() * 2;
-      days.push(fakeDay(synthDate(i), { cost, tokens, reqs }));
-      tokens += Math.round(rand() * 40000);
-      reqs += Math.round(rand() * 60);
-    }
+// 未登录/无数据时按当前粒度合成桶（小时级 24 个 / 天级 30 个）
+function synthBuckets(hourly) {
+  const rand = mulberry32(hashStr('demo-synth'));
+  const n = hourly ? 24 : 30;
+  let cost = hourly ? 0.4 : 8, tokens = hourly ? 20000 : 200000, reqs = hourly ? 40 : 400;
+  const buckets = [];
+  for (let i = 0; i < n; i++) {
+    cost += rand() * (hourly ? 0.3 : 2);
+    tokens += Math.round(rand() * (hourly ? 4000 : 40000));
+    reqs += Math.round(rand() * (hourly ? 8 : 60));
+    const label = hourly ? String(i).padStart(2, '0') + ':00' : synthDate(n - 1 - i).slice(5);
+    buckets.push({ t: i, label, full: hourly ? '今日 ' + label : synthDate(n - 1 - i), cells: fakeCells('synth:' + i, { cost, tokens, reqs }) });
   }
+  return buckets;
+}
 
-  // 今日：优先用真实今日伪造，否则取最后一天
-  let today;
-  if (data.today && data.today.date) {
-    today = fakeDay(data.today.date, dayTotals(data.today));
-  } else if (days.length) {
-    today = fakeDay(days[days.length - 1].date, dayTotals(days[days.length - 1]));
-  } else {
-    today = fakeDay(synthDate(0), { cost: 0.5, tokens: 1000, reqs: 5 });
+function aggregate(buckets) {
+  const t = { cost: 0, tokens: 0, requests: 0 };
+  for (const b of buckets) {
+    const r = bucketTotals(b.cells);
+    t.cost += r.cost; t.tokens += r.tokens; t.requests += r.reqs;
   }
+  return t;
+}
+
+function transform(data) {
+  const srcBuckets = (data.buckets || []).filter((b) => b && b.t != null && b.label != null);
+  const hourly = data.granularity === 'hour';
+  const buckets = srcBuckets.length
+    ? srcBuckets.map((b) => ({ ...b, cells: fakeCells(b.full || b.label, bucketTotals(b.cells)) }))
+    : synthBuckets(hourly);
+
+  // 今日：优先用真实今日伪造，否则取最后一个桶
+  const today = (data.today && Object.keys(data.today.cells || {}).length)
+    ? { label: data.today.label, cells: fakeCells('today:' + data.today.label, bucketTotals(data.today.cells)) }
+    : { label: data.today && data.today.label, cells: fakeCells('today:fallback', bucketTotals(buckets[buckets.length - 1].cells)) };
 
   // 余额：真实值 ×10 ± 20%，无则用固定演示值
   const balRand = mulberry32(hashStr('demo-balance'));
@@ -120,9 +120,9 @@ function transform(data) {
     apiKeys: KEY_IDS.map((id, i) => ({ trackingId: id, name: DEMO_NAMES[i], sensitiveId: '…' + (1001 + i), valid: true })),
     models: [...MODELS],
     model: MODELS[0],
-    days,
+    buckets,
     today,
-    totals: aggregate(days),
+    totals: aggregate(buckets),
     error: undefined,
   };
 }

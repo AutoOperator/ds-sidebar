@@ -10,11 +10,10 @@ const os = require('os');
 const store = require('./store');
 const { decrypt } = require('./credential-store');
 const pricing = require('../shared/pricing');
+const models = require('../shared/models');
 
 const DS_WATCH_DIR = path.join(os.homedir(), '.claude', 'ds-watch');
 const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
-const HOUR_8 = pricing.HOUR_8;
-const DAY = pricing.DAY;
 const CACHE_TTL = 60000;
 
 // 纯净模式：设置 DS_CLEAN_MODE=1 时不回退读取 ~/.claude 配置，仅用应用内设置的凭证
@@ -43,6 +42,10 @@ function getModel() {
   const env = s.env || {};
   return env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'deepseek-flash';
 }
+
+// 给界面用的模型名：用量数据里的模型已归一到现役两个，配置里的名字也得跟着归一，
+// 否则"当前模型"过滤会匹配不上任何一条用量（细条今日就会显示 0）。
+const getCanonicalModel = () => models.canonicalModel(getModel());
 
 // 北京时间（平台按北京日期切天）
 const bjParts = () => pricing.bjParts();
@@ -98,28 +101,72 @@ async function getBalance(force) {
   return balCache.value;
 }
 
-// ── 范围 → UTC 午夜 unix 秒（by_api_key 接口只接受 UTC 对齐，与官方网页一致）──
-function rangeToSecs(range) {
-  const day = 86400;
-  const now = new Date();
-  const utcToday = Math.floor(Date.now() / DAY) * DAY / 1000;
-  const tomorrow = utcToday + day;
-  const y = now.getUTCFullYear(), m = now.getUTCMonth();
-  switch (range) {
-    case '7d': return { start: utcToday - 6 * day, end: tomorrow };
-    case 'month': return { start: Date.UTC(y, m, 1) / 1000, end: tomorrow };
-    case 'lastMonth': {
-      let ly = y, lm = m - 1;
-      if (lm < 0) { lm = 11; ly -= 1; }
-      return { start: Date.UTC(ly, lm, 1) / 1000, end: Date.UTC(y, m, 1) / 1000 };
-    }
-    case '30d':
-    default: return { start: utcToday - 29 * day, end: tomorrow };
-  }
+// ── 时间范围 ──
+// 平台的桶网格锚定在请求的 start 上：跨度 ≤24h 给小时桶，≥48h 给天桶。
+// start 必须取北京日 00:00（= UTC 前一日 16:00）——之前按 UTC 日对齐，比北京日早 8 小时，
+// 于是"今天"的 24 个小时桶横跨了今天 08:00 → 明天 08:00，被切成两段，取最后一段就成了空数据。
+const BJ_OFFSET = 8 * 3600;
+const HOUR = 3600;
+const DAY_SEC = 86400;
+
+// 北京日 00:00 的 unix 秒
+function bjMidnightSec(ms) {
+  const b = pricing.bjParts(ms == null ? Date.now() : ms);
+  return Date.UTC(b.y, b.m - 1, b.day) / 1000 - BJ_OFFSET;
+}
+// unix 秒 → 北京日期 YYYY-MM-DD
+function bjDateStr(sec) {
+  return new Date((sec + BJ_OFFSET) * 1000).toISOString().slice(0, 10);
+}
+// 'YYYY-MM-DD' → 该北京日 00:00 的 unix 秒
+function parseBjDate(s) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(s || '').trim());
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / 1000 - BJ_OFFSET : null;
 }
 
-function bjDate(time) {
-  return new Date(time * 1000 + HOUR_8).toISOString().slice(0, 10);
+// 把筛选条件解析成实际查询区间 + 展示标签
+function resolveRange(sel) {
+  const cfg = sel || {};
+  const kind = cfg.range || 'today';
+  const todayStart = bjMidnightSec();
+  const tomorrow = todayStart + DAY_SEC;
+
+  if (kind === 'custom') {
+    let s = parseBjDate(cfg.start);
+    let e = parseBjDate(cfg.end);
+    if (s == null) s = todayStart;
+    if (e == null) e = todayStart;
+    if (e < s) { const t = s; s = e; e = t; }
+    const today0 = todayStart;
+    if (s > today0) s = today0;          // 不允许选未来
+    if (e > today0) e = today0;
+    const a = bjDateStr(s), b2 = bjDateStr(e);
+    return { kind, start: s, end: e + DAY_SEC, label: a === b2 ? a : a + ' ~ ' + b2 };
+  }
+
+  if (kind === 'month') {
+    const b = pricing.bjParts();
+    return { kind, start: Date.UTC(b.y, b.m - 1, 1) / 1000 - BJ_OFFSET, end: tomorrow, label: '本月' };
+  }
+  if (kind === 'lastMonth') {
+    const b = pricing.bjParts();
+    let ly = b.y, lm = b.m - 1;
+    if (lm < 1) { lm = 12; ly -= 1; }
+    return { kind, start: Date.UTC(ly, lm - 1, 1) / 1000 - BJ_OFFSET, end: Date.UTC(ly, lm, 1) / 1000 - BJ_OFFSET, label: '上月' };
+  }
+  return { kind: 'today', start: todayStart, end: tomorrow, label: '今日' };
+}
+
+// 只解析范围、不取数：取数失败时也要让界面知道当前选的是哪个范围
+function rangeMeta(sel) {
+  const r = resolveRange(sel);
+  return {
+    range: r.kind,
+    rangeLabel: r.label,
+    rangeStart: bjDateStr(r.start),
+    rangeEnd: bjDateStr(r.end - DAY_SEC),
+    granularity: r.end - r.start <= DAY_SEC ? 'hour' : 'day',
+  };
 }
 
 // ── 拉取 by_api_key 原始数据 ──
@@ -142,46 +189,79 @@ async function fetchRangeRaw(start, end, cacheKey, force) {
   return data;
 }
 
-// 合并成 每天 { date, cells: { keyId: { model: {c,t,r} } } }
-function buildDays(amtSeries, cstSeries) {
+// 按桶时间归集成 { 桶: { keyId: { model: {c,t,r} } } }，模型名归一到现役两个
+function buildCells(amtSeries, cstSeries) {
   const map = new Map();
   const ensure = (time) => {
-    if (!map.has(time)) map.set(time, { date: bjDate(time), cells: {} });
+    if (!map.has(time)) map.set(time, {});
     return map.get(time);
   };
   for (const s of amtSeries || []) {
-    const keyId = s.api_key && s.api_key.tracking_id;
-    const model = s.model || 'unknown';
+    const keyId = (s.api_key && s.api_key.tracking_id) || 'unknown';
+    const model = models.canonicalModel(s.model);
     for (const b of s.buckets || []) {
-      const day = ensure(b.time);
+      const cells = ensure(b.time);
       const u = b.usage || {};
       const tokens = (u.PROMPT_CACHE_HIT_TOKEN || 0) + (u.PROMPT_CACHE_MISS_TOKEN || 0) + (u.RESPONSE_TOKEN || 0);
       const req = u.REQUEST || 0;
-      const cell = day.cells[keyId] = day.cells[keyId] || {};
+      const cell = cells[keyId] = cells[keyId] || {};
       const c = cell[model] = cell[model] || { c: 0, t: 0, r: 0 };
       c.t += tokens;
       c.r += req;
     }
   }
   for (const s of cstSeries || []) {
-    const keyId = s.api_key && s.api_key.tracking_id;
-    const model = s.model || 'unknown';
+    const keyId = (s.api_key && s.api_key.tracking_id) || 'unknown';
+    const model = models.canonicalModel(s.model);
     for (const b of s.buckets || []) {
-      const day = ensure(b.time);
-      const cell = day.cells[keyId] = day.cells[keyId] || {};
+      const cells = ensure(b.time);
+      const cell = cells[keyId] = cells[keyId] || {};
       const c = cell[model] = cell[model] || { c: 0, t: 0, r: 0 };
       c.c += parseFloat(b.cost || '0');
     }
   }
-  return [...map.values()].sort((a, b2) => (a.date < b2.date ? -1 : 1));
+  return map;
 }
 
-function aggregate(days) {
+// 铺满整个区间的桶网格（接口只按已有数据给桶，未来/空桶可能缺，自己补齐保证图上不缺柱）
+function buildBuckets(cellsByTime, start, end) {
+  const step = end - start <= DAY_SEC ? HOUR : DAY_SEC;
+  const hourMode = step === HOUR;
+  const out = [];
+  for (let t = start; t < end; t += step) {
+    const cells = cellsByTime.get(t) || {};
+    const d = new Date((t + BJ_OFFSET) * 1000).toISOString();
+    out.push({
+      t,
+      label: hourMode ? d.slice(11, 16) : d.slice(5, 10),   // 小时桶显示 HH:MM，天桶显示 MM-DD
+      full: hourMode ? d.slice(5, 16).replace('T', ' ') : d.slice(0, 10),
+      cells,
+    });
+  }
+  return out;
+}
+
+// 把多个桶的 cells 合成一份（今日总量用）
+function mergeCells(list) {
+  const out = {};
+  for (const cells of list) {
+    for (const kid of Object.keys(cells)) {
+      for (const m of Object.keys(cells[kid])) {
+        const src = cells[kid][m];
+        const dst = ((out[kid] = out[kid] || {})[m] = out[kid][m] || { c: 0, t: 0, r: 0 });
+        dst.c += src.c; dst.t += src.t; dst.r += src.r;
+      }
+    }
+  }
+  return out;
+}
+
+function aggregate(buckets) {
   const totals = { cost: 0, tokens: 0, requests: 0 };
-  for (const d of days) {
-    for (const kid of Object.keys(d.cells)) {
-      for (const m of Object.keys(d.cells[kid])) {
-        const cell = d.cells[kid][m];
+  for (const b of buckets) {
+    for (const kid of Object.keys(b.cells)) {
+      for (const m of Object.keys(b.cells[kid])) {
+        const cell = b.cells[kid][m];
         totals.cost += cell.c;
         totals.tokens += cell.t;
         totals.requests += cell.r;
@@ -192,25 +272,45 @@ function aggregate(days) {
 }
 
 // ── 统计（范围数据 + 今日数据 + 密钥列表）──
-async function getStats(range, force) {
-  const { start, end } = rangeToSecs(range);
-  const utcToday = Math.floor(Date.now() / DAY) * DAY / 1000;
+async function getStats(rangeSel, force) {
+  const r = resolveRange(rangeSel);
+  const todayStart = bjMidnightSec();
+  const needTodayFetch = !(r.kind === 'today');
 
-  const [rangeRaw, todayRaw, apiKeys] = await Promise.all([
-    fetchRangeRaw(start, end, 'range:' + range, force),
-    fetchRangeRaw(utcToday, utcToday + 86400, 'today', force),
+  const jobs = [
+    fetchRangeRaw(r.start, r.end, 'range:' + r.kind + ':' + r.start + ':' + r.end, force),
+    needTodayFetch ? fetchRangeRaw(todayStart, todayStart + DAY_SEC, 'today:' + todayStart, force) : Promise.resolve(null),
     getApiKeyList(force),
-  ]);
+  ];
+  const [rangeRaw, todayRaw, apiKeys] = await Promise.all(jobs);
 
-  const days = buildDays(rangeRaw.amtSeries, rangeRaw.cstSeries);
-  const todayDays = buildDays(todayRaw.amtSeries, todayRaw.cstSeries);
-  const today = todayDays[todayDays.length - 1] || { date: null, cells: {} };
+  const rangeCells = buildCells(rangeRaw.amtSeries, rangeRaw.cstSeries);
+  const buckets = buildBuckets(rangeCells, r.start, r.end);
+
+  // 今日：北京日 00:00-24:00（小时桶），与当前选中范围无关，细条一直看"今天"
+  const todayCells = todayRaw ? buildCells(todayRaw.amtSeries, todayRaw.cstSeries) : rangeCells;
+  const todayBucketList = [];
+  for (let t = todayStart; t < todayStart + DAY_SEC; t += HOUR) {
+    if (todayCells.has(t)) todayBucketList.push(todayCells.get(t));
+  }
+  const today = { label: bjDateStr(todayStart), cells: mergeCells(todayBucketList) };
 
   const modelSet = new Set();
-  for (const d of days) for (const kid of Object.keys(d.cells)) for (const m of Object.keys(d.cells[kid])) modelSet.add(m);
+  for (const b of buckets) for (const kid of Object.keys(b.cells)) for (const m of Object.keys(b.cells[kid])) modelSet.add(m);
   const models = [...modelSet].sort();
 
-  return { range, apiKeys, models, days, today, totals: aggregate(days) };
+  return {
+    range: r.kind,
+    rangeStart: bjDateStr(r.start),
+    rangeEnd: bjDateStr(r.end - DAY_SEC),
+    rangeLabel: r.label,
+    granularity: buckets.length > 1 && buckets[1].t - buckets[0].t === HOUR ? 'hour' : 'day',
+    apiKeys,
+    models,
+    buckets,
+    today,
+    totals: aggregate(buckets),
+  };
 }
 
 // ── API Key 列表（60s 缓存）──
@@ -249,4 +349,4 @@ function getCreds() {
   };
 }
 
-module.exports = { getBalance, getStats, getApiKeyList, getPriceMode, getNow, getModel, getCreds };
+module.exports = { getBalance, getStats, getApiKeyList, getPriceMode, getNow, getModel, getCanonicalModel, getCreds, rangeMeta };

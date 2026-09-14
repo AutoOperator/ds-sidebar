@@ -6,11 +6,14 @@
     stripInfo: $('strip-info'), chartHeader: $('chart-header'), chartArea: $('chart-area'),
     viewBtn: $('view-btn'), pinBtn: $('pin-btn'),
     siModel: $('si-model'), siBalance: $('si-balance'), siPrice: $('si-price'), siToday: $('si-today'),
+    siApiBtn: $('si-api-btn'),
     siDemo: $('si-demo'), siLogin: $('si-login'),
     v2Title: $('v2-title'), v2Cost: $('v2-cost'), v2Requests: $('v2-requests'), v2Tokens: $('v2-tokens'),
     v2Demo: $('v2-demo'),
     v2Foot: $('v2-foot'), mainChart: $('main-chart'),
     rangeSeg: $('range-seg'), metricSeg: $('metric-seg'), groupSeg: $('group-seg'),
+    datePicker: $('date-picker'), dpStart: $('dp-start'), dpEnd: $('dp-end'),
+    dpApply: $('dp-apply'), dpCancel: $('dp-cancel'),
   };
 
   let data = null;
@@ -18,13 +21,22 @@
   let settings = { theme: 'day', opacity: 1, apiFilter: 'all' };
   // 细条所选范围：model=null 表示当前模型，api='all' 表示全部密钥
   let stripSel = { model: null, api: 'all' };
-  let chartSel = { range: '30d', groupBy: 'model', metric: 'cost' };
+  let stripApiTouched = false; // 本次运行里用户手动选过 API 后，别被设置回显覆盖
+  // 图表范围：今日（小时级）/ 自选起止日期 / 本月 / 上月
+  let chartSel = { range: 'today', start: null, end: null, groupBy: 'model', metric: 'cost' };
   let charts = [];
 
   const PALETTE = ['#0c70f3', '#8b5cf6', '#0f9d58', '#e5a50a', '#f2645f', '#00b8d9', '#e64ab6', '#5ac8fa'];
 
   // ── 格式化 ──
   const fmtMoney = (v) => (v == null || isNaN(v) ? '¥--' : '¥' + Number(v).toFixed(2));
+  // 有消费但不足一分时别显示成 ¥0.00，免得看着像没数据
+  const fmtCost = (v) => {
+    if (v == null || isNaN(v)) return '¥--';
+    const n = Number(v);
+    if (n > 0 && n < 0.01) return '<¥0.01';
+    return '¥' + n.toFixed(2);
+  };
   function fmtTokens(n) {
     if (n == null || isNaN(n)) return '--';
     n = Number(n);
@@ -33,7 +45,6 @@
     return String(n);
   }
   const fmtReq = (n) => (n == null || isNaN(n) ? '--' : (Number(n) >= 1e4 ? (Number(n) / 1e4).toFixed(1) + 'W' : String(n)));
-  const fmtDateShort = (d) => (d ? d.slice(5) : '--');
   function timeAgo(ts) {
     if (!ts) return '--';
     const s = Math.floor((Date.now() - ts) / 1000);
@@ -54,9 +65,14 @@
     const p = pm || localPriceMode();
     els.siPrice.textContent = p.mode;
     els.siPrice.className = 'si-price ' + (p.busy ? 'busy' : 'free');
-    els.siPrice.title = p.tip || '';
+    // 提示里带上本机算出的北京时间：时段判断有争议时能一眼看出是哪边的钟不对
+    const b = window.Pricing.bjParts();
+    const hhmm = String(b.h).padStart(2, '0') + ':' + String(b.min).padStart(2, '0');
+    els.siPrice.title = '现在 ' + hhmm + '（北京时间）\n' + (p.tip || '');
   }
   setInterval(() => renderPrice(), 30000);
+  // 窗口常驻隐藏（定时器被 Chromium 节流），悬停看一眼时立刻按当前时间重算，避免看到过期档位
+  els.siPrice.addEventListener('mouseenter', () => renderPrice());
 
   const cssVar = (n) => getComputedStyle(document.body).getPropertyValue(n).trim();
 
@@ -95,8 +111,9 @@
       const k = (data.apiKeys || []).find((x) => x.trackingId === stripSel.api);
       if (k) label = '今日[' + shortName(k.name) + ']';
     }
-    els.siToday.innerHTML = label + ' <span class="cost">' + (isNaN(s.c) ? '¥--' : '¥' + s.c.toFixed(2)) + '</span>' +
+    els.siToday.innerHTML = label + ' <span class="cost">' + fmtCost(s.c) + '</span>' +
       ' <span class="tokens">· ' + fmtTokens(s.t) + '</span>';
+    els.siToday.title = '点击选择 API（共 ' + ((data.apiKeys || []).length) + ' 个）';
   }
 
   function nextModel() {
@@ -108,27 +125,60 @@
     stripSel.model = list[(idx + 1) % list.length];
     renderStrip();
   }
-  function nextApi() {
-    const keys = (data && data.apiKeys) || [];
-    const list = ['all', ...keys.map((k) => k.trackingId)];
-    let idx = list.indexOf(stripSel.api);
-    if (idx < 0) idx = 0;
-    stripSel.api = list[(idx + 1) % list.length];
-    renderStrip();
+
+  // ── 自选日期 ──
+  function bjTodayStr() {
+    const b = window.Pricing.bjParts();
+    return b.y + '-' + String(b.m).padStart(2, '0') + '-' + String(b.day).padStart(2, '0');
   }
+  function openDatePicker() {
+    const t = bjTodayStr();
+    els.dpStart.max = t; els.dpEnd.max = t;   // 不允许选未来
+    els.dpStart.value = chartSel.start || t;
+    els.dpEnd.value = chartSel.end || t;
+    // 贴到「自选」按钮下方；靠近右边界时往回收，别出窗口
+    const btn = els.rangeSeg.querySelector('[data-range="custom"]');
+    if (btn) {
+      const r = btn.getBoundingClientRect();
+      const appR = els.app.getBoundingClientRect();
+      const w = els.datePicker.offsetWidth || 212;
+      const left = Math.max(4, Math.min(r.left - appR.left, appR.width - w - 6));
+      els.datePicker.style.left = Math.round(left) + 'px';
+      els.datePicker.style.top = Math.round(r.bottom - appR.top + 4) + 'px';
+    }
+    els.datePicker.classList.remove('hidden');
+  }
+  function closeDatePicker() { els.datePicker.classList.add('hidden'); }
+  els.dpCancel.addEventListener('click', (e) => { e.stopPropagation(); closeDatePicker(); });
+  els.dpApply.addEventListener('click', (e) => {
+    e.stopPropagation();
+    let s = els.dpStart.value || bjTodayStr();
+    let e2 = els.dpEnd.value || bjTodayStr();
+    if (e2 < s) { const t = s; s = e2; e2 = t; }
+    chartSel.range = 'custom'; chartSel.start = s; chartSel.end = e2;
+    closeDatePicker();
+    syncControlUI();
+    window.api.stats.setRange({ range: 'custom', start: s, end: e2 });
+  });
+  els.datePicker.addEventListener('mousedown', (e) => e.stopPropagation());
 
   // ── 渲染 ──
   function render(d) {
     data = d || data;
     if (!data) return;
     els.v2Demo.classList.toggle('hidden', !data.demo);
-    if (data.range) chartSel.range = data.range;
+    if (data.range) {
+      chartSel.range = data.range;
+      chartSel.start = data.rangeStart || null;
+      chartSel.end = data.rangeEnd || null;
+    }
     renderStrip();
     const totals = data.totals || { cost: 0, tokens: 0, requests: 0 };
     els.v2Cost.textContent = '¥' + Number(totals.cost).toFixed(2);
     els.v2Requests.textContent = fmtReq(totals.requests);
     els.v2Tokens.textContent = fmtTokens(totals.tokens);
-    els.v2Title.textContent = chartSel.metric === 'tokens' ? 'Tokens' : '消费金额';
+    const metricName = chartSel.metric === 'tokens' ? 'Tokens' : '消费金额';
+    els.v2Title.textContent = data.rangeLabel ? metricName + ' · ' + data.rangeLabel : metricName;
     els.v2Foot.textContent = '共 ¥' + Number(totals.cost).toFixed(2) + ' · ' + fmtTokens(totals.tokens) + ' · ' + fmtReq(totals.requests) + ' 次 · 更新于 ' + timeAgo(data.updatedAt);
     if (loginError()) els.v2Foot.textContent = '未登录 · 点击左上角 ≡ 打开设置登录';
     syncControlUI();
@@ -148,15 +198,11 @@
     return all.filter((id) => filter.includes(id));
   }
 
-  // 模型配色。现役：deepseek-flash（旧名 deepseek-v4-flash 已退役但历史用量行仍会返回）、
-  // deepseek-v4-pro、deepseek-v4-flash-vision-exp。旧别名 deepseek-chat / deepseek-reasoner
-  // 由 V4 Flash 承载，故保留其在旧图表里的绿色。未知模型走哈希取色。
+  // 模型配色。模型名已在数据层归一到现役两个（历史别名归入同族），所以只留两色；
+  // 万一出现没见过的模型名，走哈希取色兜底。
   const MODEL_COLORS = {
     'deepseek-flash': () => cssVar('--accent'),
     'deepseek-v4-pro': () => '#8b5cf6',
-    'deepseek-v4-flash-vision-exp': () => '#00b8d9',
-    'deepseek-v4-flash': () => '#5ac8fa',
-    'deepseek-chat & deepseek-reasoner': () => '#0f9d58',
   };
 
   function modelColor(m) {
@@ -168,7 +214,7 @@
   }
 
   function stackedBarOption() {
-    const days = data.days || [];
+    const buckets = data.buckets || [];
     const metric = chartSel.metric;
     const text2 = cssVar('--text-2');
     const gridColor = cssVar('--panel-border');
@@ -177,10 +223,10 @@
 
     if (chartSel.groupBy === 'model') {
       for (const model of data.models || []) {
-        const arr = days.map((d) => {
+        const arr = buckets.map((b) => {
           let cost = 0, tokens = 0;
           for (const kid of activeKeys()) {
-            const cell = (d.cells[kid] || {})[model];
+            const cell = (b.cells[kid] || {})[model];
             if (cell) { cost += cell.c; tokens += cell.t; }
           }
           return { value: metric === 'tokens' ? tokens : cost, cost, tokens };
@@ -190,9 +236,9 @@
     } else {
       const apiMap = new Map((data.apiKeys || []).map((k) => [k.trackingId, k.name]));
       activeKeys().forEach((kid, i) => {
-        const arr = days.map((d) => {
+        const arr = buckets.map((b) => {
           let cost = 0, tokens = 0;
-          const cm = d.cells[kid] || {};
+          const cm = b.cells[kid] || {};
           for (const model of Object.keys(cm)) {
             cost += cm[model].c; tokens += cm[model].t;
           }
@@ -212,7 +258,7 @@
       series.push({
         name: metric === 'tokens' ? 'Tokens' : '消费', type: 'bar', stack: 'total', barMaxWidth: 16,
         itemStyle: { color: accent },
-        data: days.map(() => ({ value: 0, cost: 0, tokens: 0 })),
+        data: buckets.map(() => ({ value: 0, cost: 0, tokens: 0 })),
       });
     }
 
@@ -230,8 +276,8 @@
         borderWidth: 0,
         textStyle: { color: '#fff', fontSize: 11 },
         formatter: (params) => {
-          const date = params[0].axisValue;
-          let html = '<b>' + date + '</b>';
+          const b = buckets[params[0].dataIndex] || {};
+          let html = '<b>' + (b.full || params[0].axisValue) + '</b>';
           let tCost = 0, tTok = 0;
           for (const p of params) {
             const cost = Number(p.data.cost);
@@ -249,7 +295,7 @@
       },
       xAxis: {
         type: 'category',
-        data: days.map((d) => fmtDateShort(d.date)),
+        data: buckets.map((b) => b.label),
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: { color: text2, fontSize: 10, hideOverlap: true },
@@ -279,10 +325,13 @@
   }
   els.rangeSeg.addEventListener('click', (e) => {
     const r = e.target.dataset.range;
-    if (!r || r === chartSel.range) return;
+    if (!r) return;
+    if (r === 'custom') { openDatePicker(); return; }   // 自选：先开日期面板，确定后才生效
+    if (r === chartSel.range) { closeDatePicker(); return; }
     chartSel.range = r;
+    closeDatePicker();
     syncControlUI();
-    window.api.stats.setRange(r);
+    window.api.stats.setRange({ range: r });
   });
   els.metricSeg.addEventListener('click', (e) => {
     const m = e.target.dataset.metric;
@@ -327,6 +376,9 @@
     applyTheme(settings.theme);
     els.pinBtn.classList.toggle('active', settings.pinned === true);
     els.app.classList.toggle('pinned', settings.pinned === true); // 固定：禁止拖动
+    // 细条选中的 API 记在设置里，重启后仍是上次那个（用户手动切过则不再覆盖）
+    if (!stripApiTouched && typeof settings.stripApi === 'string') stripSel.api = settings.stripApi;
+    renderStrip();
   }
   window.api.settings.onChanged((s) => applySettings(s));
 
@@ -347,11 +399,26 @@
     e.preventDefault();
     window.api.menu.open(Math.round(e.clientX), Math.round(e.clientY));
   });
-  document.getElementById('app').addEventListener('mousedown', () => window.api.menu.close());
+  document.getElementById('app').addEventListener('mousedown', (e) => {
+    window.api.menu.close();
+    if (!els.datePicker.contains(e.target)) closeDatePicker();
+  });
 
-  // 细条交互：模型 / 今日消费 点击循环
+  // 细条交互：模型点击循环；今日消费点出 API 列表（15 个 key 挨个点太慢，改成列表选）
   els.siModel.addEventListener('click', (e) => { e.stopPropagation(); nextModel(); });
-  els.siToday.addEventListener('click', (e) => { e.stopPropagation(); nextApi(); });
+  const openApiPicker = (e) => {
+    e.stopPropagation();
+    const r = els.siToday.getBoundingClientRect();
+    window.api.menu.openApiPicker(Math.round(r.left), Math.round(r.bottom) + 2);
+  };
+  els.siToday.addEventListener('click', openApiPicker);
+  els.siApiBtn.addEventListener('click', openApiPicker);
+  // 列表在菜单窗口里选完，主进程回传结果
+  window.api.strip.onSetApi((id) => {
+    stripApiTouched = true;
+    stripSel.api = id || 'all';
+    renderStrip();
+  });
 
   // 未登录提示 → 打开设置菜单（含凭证填写与一键登录）
   els.siLogin.addEventListener('click', (e) => {

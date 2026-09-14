@@ -91,6 +91,13 @@
       <span>关闭到托盘</span>
     </button>
   </div>
+
+  <!-- API 选择列表（细条上点「今日 ▾」展开；API 多的时候挨个点太慢） -->
+  <div id="api-picker" class="hidden">
+    <input type="text" id="api-search" class="text-input" placeholder="搜索名称…">
+    <div class="api-list" id="api-list"></div>
+  </div>
+
   <script src="./menu.js"></script>
 </body>
 </html>

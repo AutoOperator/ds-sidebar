@@ -126,6 +126,21 @@ html, body {
 }
 .si-today .cost { color: var(--cost); }
 .si-bal .green { color: var(--bal); }
+/* 细条上的 API 下拉箭头：key 多的时候挨个点太慢，点这里出列表 */
+.si-caret {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 4px;
+  margin-left: -2px;
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.si-caret:hover { color: var(--accent); background: var(--btn-hover); }
 .si-sep {
   width: 1px; height: 14px;
   background: var(--divider);
@@ -141,7 +156,58 @@ html, body {
   min-width: 0;
   height: 100%;
   overflow: hidden;
+  position: relative; /* 自选日期面板以此为定位参照 */
 }
+
+/* ── 自选日期面板（挂在 #app 上，位置由 JS 按「自选」按钮算） ── */
+.date-picker {
+  position: absolute;
+  top: 44px;
+  left: 150px;
+  z-index: 30;
+  width: 212px;
+  background: var(--card-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 26px var(--shadow);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+.date-picker.hidden { display: none; }
+.dp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.dp-row input[type='date'] {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: 3px 6px;
+}
+.dp-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.dp-actions .seg-btn {
+  border: 1px solid var(--panel-border);
+  background: var(--card-bg);
+  color: var(--text-2);
+  font-size: 10.5px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dp-actions .seg-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .ch-title {
   font-size: 12px; font-weight: 700; color: var(--text);
   flex: 0 0 auto;

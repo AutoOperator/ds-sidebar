@@ -41,30 +41,34 @@ app.on('second-instance', () => {
 
 let isQuitting = false;
 let refreshTimer = null;
+let lastData = null; // 最近一次聚合结果；API 选择列表直接用它，省一次网络往返（点开即出）
 
 process.on('uncaughtException', (e) => console.log('[MAIN-ERR]', e));
 process.on('unhandledRejection', (e) => console.log('[MAIN-REJ]', e));
 
 // 聚合数据：余额 + 按范围用量统计（余额/用量互不拖累，缺一个另一个照常显示）
 async function collectData(force) {
-  const range = store.getSettings().range || '30d';
+  const s = store.getSettings();
+  const sel = { range: s.range || 'today', start: s.rangeStart, end: s.rangeEnd };
   const [balanceRes, statsRes] = await Promise.allSettled([
     dsApi.getBalance(force),
-    dsApi.getStats(range, force),
+    dsApi.getStats(sel, force),
   ]);
   const base = statsRes.status === 'fulfilled' ? statsRes.value : {};
   const data = {
+    ...dsApi.rangeMeta(sel), // 取数失败时也保证界面知道当前选的范围
     ...base,
     balance: balanceRes.status === 'fulfilled' ? balanceRes.value : null,
-    model: dsApi.getModel(),
+    model: dsApi.getCanonicalModel(), // 归一过，才能和用量数据里的模型名对上
     priceMode: dsApi.getPriceMode(),
     now: dsApi.getNow(),
     updatedAt: Date.now(),
     demo: demo.isDemo(),
     error: statsRes.status === 'fulfilled' ? undefined : String((statsRes.reason && statsRes.reason.message) || statsRes.reason),
   };
-  if (demo.isDemo()) return demo.transform(data);
-  return data;
+  const out = demo.isDemo() ? demo.transform(data) : data;
+  lastData = out;
+  return out;
 }
 
 // 刷新并广播到渲染进程
@@ -155,10 +159,18 @@ function registerIpc() {
     const win = getMainWindow();
     if (!win || win.isDestroyed() || !p) return;
     const b = win.getBounds();
-    menuManager.openMenuAt(b.x + (p.x || 0), b.y + (p.y || 0));
+    menuManager.openMenuAt(b.x + (p.x || 0), b.y + (p.y || 0), p.mode || 'menu');
   });
   ipcMain.on('menu:close', () => menuManager.hideMenu());
   ipcMain.on('menu:fit', (e, size) => menuManager.fitMenu(size));
+
+  // 细条上选了哪个 API（选择器在菜单窗口里，选完回传主窗口）
+  ipcMain.on('strip:setApi', (e, trackingId) => {
+    const id = String(trackingId || 'all');
+    store.updateSettings({ stripApi: id }); // 记住选择，重启后还在
+    const win = getMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('strip:setApi', id);
+  });
 
   // 外部切换视图（主进程发给渲染进程）
   ipcMain.on('view:set', (e, mode) => {
@@ -166,14 +178,34 @@ function registerIpc() {
     if (win && !win.isDestroyed()) win.webContents.send('view:set', mode === 2 ? 2 : 1);
   });
 
-  // 统计：切换时间范围
-  ipcMain.handle('stats:setRange', (e, range) => {
-    const r = ['7d', '30d', 'month', 'lastMonth'].includes(range) ? range : '30d';
-    store.updateSettings({ range: r });
+  // 统计：切换时间范围（today / custom(带起止日期) / month / lastMonth）
+  ipcMain.handle('stats:setRange', (e, sel) => {
+    const KNOWN = ['today', 'custom', 'month', 'lastMonth'];
+    const r = KNOWN.includes(sel && sel.range) ? sel.range : 'today';
+    const patch = { range: r };
+    if (r === 'custom') {
+      const okDate = (v) => (typeof v === 'string' && /^\d{4}-\d{1,2}-\d{1,2}$/.test(v) ? v : null);
+      patch.rangeStart = okDate(sel && sel.start);
+      patch.rangeEnd = okDate(sel && sel.end);
+    }
+    store.updateSettings(patch);
     refreshAndBroadcast();
     return true;
   });
+  ipcMain.handle('stats:getRange', () => {
+    const s = store.getSettings();
+    return { range: s.range || 'today', start: s.rangeStart || null, end: s.rangeEnd || null };
+  });
   ipcMain.handle('stats:getApiKeys', () => dsApi.getApiKeyList(true));
+  // API 选择列表的数据：复用最近一次聚合结果（已含示范模式的伪装），点开即出
+  ipcMain.handle('stats:getPicker', () => {
+    const d = lastData || {};
+    return {
+      apiKeys: d.apiKeys || [],
+      today: (d.today && d.today.cells) || {},
+      current: store.getSettings().stripApi || 'all',
+    };
+  });
   ipcMain.handle('stats:getCreds', () => dsApi.getCreds());
 
   // 一键获取 User Token：内嵌登录平台，抓到 token 后保存并刷新
@@ -280,6 +312,7 @@ app.whenReady().then(() => {
           priceTip: document.getElementById('si-price').title,
           pricingLoaded: typeof window.Pricing,
           today: document.getElementById('si-today').textContent,
+          caret: !!document.getElementById('si-api-btn'),
           balance: document.getElementById('si-balance').textContent,
           creds: await window.api.stats.getCreds().then((c) => ({
             tokenOk: (c.userToken || '').length > 10, tokenSource: c.userTokenSource,
@@ -297,9 +330,15 @@ app.whenReady().then(() => {
         await new Promise((r) => setTimeout(r, 1500));
         const v2 = await win.webContents.executeJavaScript(`(() => ({
           w: window.innerWidth, h: window.innerHeight,
-          rangeBtns: document.querySelectorAll('#range-seg .seg-btn').length,
+          rangeBtns: [...document.querySelectorAll('#range-seg .seg-btn')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')),
           groupBtns: document.querySelectorAll('#group-seg .seg-btn').length,
           title: document.getElementById('v2-title').textContent,
+          datePanelHidden: document.getElementById('date-picker').classList.contains('hidden'),
+          axisPoints: (() => {
+            const inst = window.echarts && window.echarts.getInstanceByDom(document.getElementById('main-chart'));
+            const d = inst && inst.getOption().xAxis && inst.getOption().xAxis[0] && inst.getOption().xAxis[0].data;
+            return d ? d.length + ':' + d.slice(0, 3).join(',') + '…' + d[d.length - 1] : -1;
+          })(),
           statBoxes: [...document.querySelectorAll('.mini-stat')].map((e) => {
             const v = e.querySelector('.ms-value');
             return { text: v.textContent, w: v.clientWidth, need: v.scrollWidth, truncated: v.scrollWidth > v.clientWidth };
@@ -315,11 +354,86 @@ app.whenReady().then(() => {
         }))()`);
         console.log('[V2-CHART]', JSON.stringify(v2));
         probe.v2 = v2;
-        // 打包版 stdout 不接控制台，把探针结果落盘，两种形态都能核对
-        fs.writeFileSync(path.join(shotsDir, 'probe.json'), JSON.stringify(probe, null, 2));
         await cap('view2.png');
+
+        // 自选日期：点开面板（先截图，面板此时是打开的）→ 选最近 3 天 → 确定 → 看图表是否变成天级
+        const dp = await win.webContents.executeJavaScript(`(() => {
+          document.querySelector('#range-seg [data-range="custom"]').click();
+          const el = document.getElementById('date-picker');
+          const r = el.getBoundingClientRect();
+          const cs = getComputedStyle(el);
+          return {
+            visible: !el.classList.contains('hidden'),
+            rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+            style: cs.display + '/' + cs.visibility + '/z' + cs.zIndex,
+            start: document.getElementById('dp-start').value,
+            end: document.getElementById('dp-end').value,
+            max: document.getElementById('dp-end').max,
+          };
+        })()`);
+        console.log('[V2-DATEPICK]', JSON.stringify(dp));
+        probe.datepick = dp;
+        await new Promise((r) => setTimeout(r, 600)); // 等一帧绘制再截图
+        // 命中测试：这一点若返回面板内的元素，说明面板确实在最上层且可见
+        const hit = await win.webContents.executeJavaScript(`(() => {
+          const el = document.elementFromPoint(300, 80);
+          return el ? (el.closest('#date-picker') ? 'inside-date-picker:' + el.tagName + (el.id ? '#' + el.id : '') : 'other:' + el.tagName + (el.id ? '#' + el.id : '')) : 'null';
+        })()`);
+        console.log('[V2-DATEPICK-HIT]', hit);
+        probe.datepickHit = hit;
+        await cap('view3-datepicker.png');
+
+        const applied = await win.webContents.executeJavaScript(`(() => {
+          const b = window.Pricing.bjParts();
+          const s = new Date(Date.UTC(b.y, b.m - 1, b.day) - 2 * 86400000).toISOString().slice(0, 10);
+          document.getElementById('dp-start').value = s;
+          document.getElementById('dp-apply').click();
+          return { start: s, panelHiddenAfter: document.getElementById('date-picker').classList.contains('hidden') };
+        })()`);
+        probe.applied = applied;
+        await new Promise((r) => setTimeout(r, 2500)); // 等数据刷新回来
+        const v3 = await win.webContents.executeJavaScript(`(() => {
+          const inst = window.echarts && window.echarts.getInstanceByDom(document.getElementById('main-chart'));
+          const d = inst && inst.getOption().xAxis && inst.getOption().xAxis[0].data;
+          return {
+            title: document.getElementById('v2-title').textContent,
+            datePanelHidden: document.getElementById('date-picker').classList.contains('hidden'),
+            axisPoints: d ? d.length + ':' + d.join(',') : -1,
+          };
+        })()`);
+        console.log('[V3-CUSTOM]', JSON.stringify(v3));
+        probe.custom = v3;
+        await cap('view4-custom.png');
+
+        // API 选择列表（在菜单窗口里）
+        await win.webContents.executeJavaScript(`document.getElementById('si-api-btn').click()`);
+        const menuWin = menuManager.getMenuWindow();
+        if (menuWin && !menuWin.isDestroyed()) {
+          menuWin.webContents.on('console-message', (e, level, msg) => {
+            if (level >= 2) console.log('[MENU-RENDERER]', msg);
+          });
+          let pick = null;
+          for (let i = 0; i < 12; i++) {           // 数据走内存，正常一两轮就出
+            await new Promise((r) => setTimeout(r, 300));
+            pick = await menuWin.webContents.executeJavaScript(`(() => ({
+              pickerVisible: !document.getElementById('api-picker').classList.contains('hidden'),
+              menuHidden: document.getElementById('menu').classList.contains('hidden'),
+              items: document.querySelectorAll('.api-item').length,
+              first: [...document.querySelectorAll('.api-item')].slice(0, 3).map((b) => b.textContent),
+            }))()`).catch((e) => 'ERR:' + e.message);
+            if (pick && pick.items > 0) break;
+          }
+          console.log('[PICKER]', JSON.stringify(pick));
+          probe.picker = pick;
+          const img = await menuWin.webContents.capturePage();
+          fs.writeFileSync(path.join(shotsDir, 'view5-apipicker.png'), img.toPNG());
+          await win.webContents.executeJavaScript(`document.getElementById('app').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`);
+          await new Promise((r) => setTimeout(r, 300));
+        }
         snapManager.unsnap();
         win.show();
+        // 打包版 stdout 不接控制台，把探针结果落盘，两种形态都能核对
+        fs.writeFileSync(path.join(shotsDir, 'probe.json'), JSON.stringify(probe, null, 2));
         store.update(prevState); // 最后还原，确保截图过程写下的窗口位置/视图不落盘
         setTimeout(() => app.quit(), 300);
       }, 500);

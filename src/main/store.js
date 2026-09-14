@@ -36,8 +36,9 @@ function load() {
     if (state.settings.theme == null) state.settings.theme = 'day';
     if (state.settings.opacity == null) state.settings.opacity = 1;
   }
-  if (state.settings.range == null) state.settings.range = '30d';
+  if (state.settings.range == null) state.settings.range = 'today';
   if (state.settings.apiFilter == null) state.settings.apiFilter = 'all';
+  if (state.settings.stripApi == null) state.settings.stripApi = 'all';
   if (state.settings.autoSnap == null) state.settings.autoSnap = true;
   if (state.settings.pinned == null) state.settings.pinned = false;
   if (state.settings.demo == null) state.settings.demo = false;

@@ -51,14 +51,15 @@ function ensureMenuWindow() {
 }
 
 // 在屏幕坐标处打开菜单；位置先用鼠标点，等内容量出后再收紧
-async function openMenuAt(x, y) {
+// mode: 'menu'（默认，≡/右键菜单）| 'api'（细条上的 API 选择列表）
+async function openMenuAt(x, y, mode) {
   const w = await ensureMenuWindow();
   if (!w) return;
   w.setPosition(Math.round(x), Math.round(y));
   lastShownAt = Date.now();
   w.show();
   w.focus();
-  w.webContents.send('menu:show');
+  w.webContents.send('menu:show', mode === 'api' ? 'api' : 'menu');
 }
 
 function hideMenu() {

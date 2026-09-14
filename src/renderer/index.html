@@ -17,7 +17,7 @@
         </svg>
       </button>
 
-      <!-- 视图1：一条文字  模型(点切换) | 余额 | 高峰/低谷 | 今日消费(点切API) -->
+      <!-- 视图1：一条文字  模型(点切换) | 余额 | 高峰/低谷 | 今日消费(点开API列表) -->
       <div id="strip-info" class="strip-info">
         <span id="si-demo" class="demo-badge hidden">示范</span>
         <span id="si-login" class="login-badge hidden" title="点击打开设置登录">未登录·点击登录</span>
@@ -27,16 +27,17 @@
         <span class="si-sep"></span>
         <span class="si-price" id="si-price">--</span>
         <span class="si-sep"></span>
-        <span class="si-today clickable" id="si-today" title="点击切换API">今日 ¥--</span>
+        <span class="si-today clickable" id="si-today" title="点击选择 API">今日 ¥--</span>
+        <button id="si-api-btn" class="si-caret" title="展开 API 列表">▾</button>
       </div>
 
       <!-- 视图2：范围 + 统计控制 -->
       <div id="chart-header" class="chart-header hidden">
         <span id="v2-demo" class="demo-badge hidden">示范</span>
-        <span class="ch-title" id="v2-title">消费金额 · 近30天</span>
+        <span class="ch-title" id="v2-title">消费金额 · 今日</span>
         <div class="ctrl-seg" id="range-seg">
-          <button data-range="7d" class="seg-btn">近7天</button>
-          <button data-range="30d" class="seg-btn active">近30天</button>
+          <button data-range="today" class="seg-btn active">今日</button>
+          <button data-range="custom" class="seg-btn">自选</button>
           <button data-range="month" class="seg-btn">本月</button>
           <button data-range="lastMonth" class="seg-btn">上月</button>
         </div>
@@ -56,11 +57,22 @@
           <div class="mini-stat"><span class="ms-label">Tokens</span><span class="ms-value" id="v2-tokens">--</span></div>
         </div>
       </div>
+
       <button id="pin-btn" class="icon-btn" title="固定(禁止拖动/吸附/自动隐藏)">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
           <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
         </svg>
       </button>
+    </div>
+
+    <!-- 自选日期面板：挂在 #app 上（表头是 overflow:hidden，放里面会被裁掉），位置按「自选」按钮算 -->
+    <div id="date-picker" class="date-picker hidden">
+      <label class="dp-row"><span>开始</span><input type="date" id="dp-start"></label>
+      <label class="dp-row"><span>结束</span><input type="date" id="dp-end"></label>
+      <div class="dp-actions">
+        <button id="dp-cancel" class="seg-btn">取消</button>
+        <button id="dp-apply" class="seg-btn active">确定</button>
+      </div>
     </div>
 
     <!-- 视图2：图表区 -->

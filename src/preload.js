@@ -25,12 +25,22 @@ contextBridge.exposeInMainWorld('api', {
   },
   menu: {
     open: (x, y) => ipcRenderer.send('menu:open', { x, y }),
+    openApiPicker: (x, y) => ipcRenderer.send('menu:open', { x, y, mode: 'api' }),
     close: () => ipcRenderer.send('menu:close'),
     fit: (width, height) => ipcRenderer.send('menu:fit', { width, height }),
     onShow: (cb) => {
-      const h = () => cb();
+      const h = (e, mode) => cb(mode);
       ipcRenderer.on('menu:show', h);
       return () => ipcRenderer.removeListener('menu:show', h);
+    },
+  },
+  strip: {
+    // 细条上选了哪个 API（列表在菜单窗口里，选完回传主窗口）
+    setApi: (trackingId) => ipcRenderer.send('strip:setApi', trackingId),
+    onSetApi: (cb) => {
+      const h = (e, id) => cb(id);
+      ipcRenderer.on('strip:setApi', h);
+      return () => ipcRenderer.removeListener('strip:setApi', h);
     },
   },
   settings: {
@@ -43,7 +53,9 @@ contextBridge.exposeInMainWorld('api', {
     },
   },
   stats: {
-    setRange: (range) => ipcRenderer.invoke('stats:setRange', range),
+    setRange: (sel) => ipcRenderer.invoke('stats:setRange', sel),
+    getRange: () => ipcRenderer.invoke('stats:getRange'),
+    getPicker: () => ipcRenderer.invoke('stats:getPicker'),
     getApiKeys: () => ipcRenderer.invoke('stats:getApiKeys'),
     getCreds: () => ipcRenderer.invoke('stats:getCreds'),
   },

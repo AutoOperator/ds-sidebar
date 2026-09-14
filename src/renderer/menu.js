@@ -3,7 +3,8 @@
   const api = window.api;
   const $ = (id) => document.getElementById(id);
 
-  let settingsState = { theme: 'day', opacity: 1, autoSnap: true, range: '30d', hideDelay: 3000 };
+  let settingsState = { theme: 'day', opacity: 1, autoSnap: true, range: 'today', hideDelay: 3000 };
+  let picker = { apiKeys: [], today: {}, current: 'all' };
 
   const TRIGGER_COLORS = ['#2563eb', '#8b5cf6', '#0f9d58', '#f59e0b', '#f2645f', '#00b8d9', '#e64ab6'];
 
@@ -40,7 +41,68 @@
     measure();
   }
 
-  api.menu.onShow(refresh);
+  api.menu.onShow(async (mode) => {
+    if (mode === 'api') { await showApiPicker(); return; }
+    $('api-picker').classList.add('hidden');
+    $('menu').classList.remove('hidden');
+    refresh();
+  });
+
+  // ── API 选择列表：按今日消费从高到低排，带搜索，直接选不用挨个点 ──
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const fmtTok = (n) => (n >= 1e8 ? (n / 1e8).toFixed(2) + '亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + 'W' : String(n));
+
+  function keyToday(id) {
+    const cells = (picker.today && picker.today[id]) || {};
+    let c = 0, t = 0;
+    for (const m of Object.keys(cells)) { c += cells[m].c || 0; t += cells[m].t || 0; }
+    return { c, t };
+  }
+
+  async function showApiPicker() {
+    $('menu').classList.add('hidden');
+    $('api-picker').classList.remove('hidden');
+    $('api-search').value = '';
+    picker = await api.stats.getPicker().catch(() => picker);
+    renderApiList();
+    $('api-search').focus();
+  }
+
+  function renderApiList() {
+    const q = $('api-search').value.trim().toLowerCase();
+    const box = $('api-list');
+    box.innerHTML = '';
+    const rows = [{ id: 'all', name: '全部 API', ...(() => {
+      let c = 0, t = 0;
+      for (const k of picker.apiKeys || []) { const v = keyToday(k.trackingId); c += v.c; t += v.t; }
+      return { c, t };
+    })() }];
+    const per = (picker.apiKeys || []).map((k) => ({ id: k.trackingId, name: k.name || k.trackingId, ...keyToday(k.trackingId) }));
+    per.sort((a, b) => b.c - a.c || a.name.localeCompare(b.name));
+    rows.push(...per);
+
+    let shown = 0;
+    for (const r of rows) {
+      if (q && r.id !== 'all' && !r.name.toLowerCase().includes(q)) continue;
+      shown++;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'menu-item api-item' + (picker.current === r.id ? ' active' : '');
+      b.innerHTML = '<span class="api-name">' + esc(r.name) + '</span>' +
+        '<span class="api-cost">' + (r.c > 0 ? '¥' + r.c.toFixed(2) : r.t > 0 ? fmtTok(r.t) : '') + '</span>';
+      b.addEventListener('click', () => { api.strip.setApi(r.id); api.menu.close(); });
+      box.appendChild(b);
+    }
+    if (!shown) {
+      const d = document.createElement('div');
+      d.className = 'sub-hint';
+      d.textContent = '没有匹配的 API';
+      box.appendChild(d);
+    }
+    measure();
+  }
+
+  $('api-search').addEventListener('input', renderApiList);
 
   $('view-item').addEventListener('click', async () => {
     const st = await api.window.getState().catch(() => ({ viewMode: 1 }));

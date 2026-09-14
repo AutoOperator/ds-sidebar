@@ -43,6 +43,44 @@ body { overflow: visible; }
 
 .sep { height: 1px; background: var(--divider); margin: 4px 6px; }
 
+/* ── API 选择列表 ── */
+#api-picker {
+  width: 240px;
+  background: var(--card-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px var(--shadow);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#api-picker.hidden { display: none; }
+#api-search {
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: 5px 8px;
+}
+.api-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.api-list::-webkit-scrollbar { width: 6px; }
+.api-list::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 3px; }
+.api-item { height: 30px; }
+.api-item.active { background: var(--accent-soft); }
+.api-item.active .api-name { color: var(--accent); font-weight: 700; }
+.api-name { flex: 1; min-width: 0; }
+.api-cost {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 设置子面板（手风琴） */
 .sub {
   border-radius: 8px;
